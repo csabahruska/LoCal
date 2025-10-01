@@ -23,6 +23,10 @@ data Ty
     - no tag for Tup2 ; problem to solve is location aliasing
 -}
 
+
+-- data IntList = Cons Int IntList
+--              | Nil
+
 i64ListTy : Ty
 i64ListTy =
   DecBox $ \t =>
@@ -30,14 +34,14 @@ i64ListTy =
 
 data Region : Type where
 
-data Loc : (1 r : Region) -> Type where
+data Loc : (_ : Ty) -> (1 _ : Region) -> Type where
 
-data LocExp : (1 r : Region) -> Type where
+data LocExp : (1 _ : Region) -> Type where
   LocStart    : (1 r : Region) -> LocExp r
-  LocAfter    : Ty -> (1 l : Loc r) -> LocExp r   -- Q: dynamically/runtime known? maybe a better name is RuntimeAfter ; A: NO!
-  LocAfterTag : (1 l : Loc r) -> LocExp r         -- statically known ; used for jump over the tag
+  LocAfter    : Ty -> (1 _ : Loc _ r) -> LocExp r   -- Q: dynamically/runtime known? maybe a better name is RuntimeAfter ; A: NO!
+  LocAfterTag : (1 _ : Loc _ r) -> LocExp r         -- statically known ; used for jump over the tag
 
-data Def : (arg : Ty) -> (res : Ty) -> Type
+data Fun : (arg : Ty) -> (res : Ty) -> Type
 
 {-
   Q:
@@ -52,12 +56,32 @@ data Def : (arg : Ty) -> (res : Ty) -> Type
     - only tup2 and either ; product and sum type
     - only I64 interger primitive type
     - functions with only single argument
+    - no sharing
 
   Q: what about stack frames and stack based memory management?
   Q: what about returning values in registers?
   A: use special region for that, or use escape analysis on regions
+
+  mvp example:
+    - program read user input N:int
+    - creates a List of Int from 1 to N unpacked in a buffer
+
 -}
 
+{-
+  currently sharing is not supported
+  for support we need:
+    + indirection value
+    + location for indirection
+    + linear value types ; in Let
+    + dup hoas primitive
+-}
+
+{-
+  TODO: refactor to
+    - simple expression ; value definition
+    - bind chain ; various lets, return value
+-}
 data Exp : (t : Ty) -> Type where
   TT : Exp I64
 
@@ -69,26 +93,26 @@ data Exp : (t : Ty) -> Type where
   MkLeft  : Exp a -> Exp (Either a b)
   MkRight : Exp b -> Exp (Either a b)
 
-  CaseFst     : Exp (Tup2 a b)   -> (Loc r -> Exp a -> Exp c) -> Exp c
-  CaseSnd     : Exp (Tup2 a b)   -> (Loc r -> Exp b -> Exp c) -> Exp c
-  CaseEither  : Exp (Either a b) -> (Loc r -> Exp a -> Exp c) -> (Loc r -> Exp b -> Exp c) -> Exp c
+  CaseFst     : Exp (Tup2 a b)   -> (Loc a r -> Exp a -> Exp c) -> Exp c
+  CaseSnd     : Exp (Tup2 a b)   -> (Loc b r -> Exp b -> Exp c) -> Exp c
+  CaseEither  : Exp (Either a b) -> (Loc a r -> Exp a -> Exp c) -> (Loc b r -> Exp b -> Exp c) -> Exp c
 
   -- location related
-  LetRegion : (1 c : (1 r : Region) -> Exp a) -> Exp a
-  LetLoc : (1 le : LocExp r) -> (1 c : (1 l : Loc r) -> Loc r -> Exp a) -> Exp a -- Q: is this needed? use loc expressions for construction?
+  LetRegion : (1 _ : (1 _ : Region) -> Exp a) -> Exp a
+  LetLoc : {t : Ty} -> (1 _ : LocExp r) -> (1 _ : (1 _ : Loc t r) -> Loc t r -> Exp a) -> Exp a -- Q: is this needed? use loc expressions for construction?
 
   -- generic
-  Let : (1 l : Loc r) -> Exp a -> (1 c : Exp a -> Exp b) -> Exp b
+  Let : (1 _ : Loc a _) -> Exp a -> (1 _ : Exp a -> Exp b) -> Exp b
 
-  AppDef : Def arg res -> Exp arg -> Exp res
+  FunApp : Fun arg res -> Exp arg -> Exp res
 
-data Def : (arg : Ty) -> (res : Ty) -> Type where
-  MkDefId : Int -> Def arg res
+data Fun : (arg : Ty) -> (res : Ty) -> Type where
+  MkFunId : Int -> Fun arg res
 
 data DefList : Type where
   NilDef  : DefList
-  MkDec   : {arg : Ty} -> {res : Ty} -> (Def arg res -> DefList) -> DefList
-  MkDef   : {arg : Ty} -> {res : Ty} -> Def arg res -> (Exp arg -> Exp res) -> DefList -> DefList
+  MkDec   : {arg : Ty} -> {res : Ty} -> (Fun arg res -> DefList) -> DefList
+  MkDef   : {arg : Ty} -> {res : Ty} -> Fun arg res -> (Exp arg -> Exp res) -> DefList -> DefList
 
 -- -------------------------------
 
@@ -97,10 +121,20 @@ test i =
   MkDec $ \myFun1 =>
   MkDef {arg = I64} myFun1 (\a => a) $
   NilDef
-f : (1 t : Int) -> Int -> Int
+
+f : (1 _ : Int) -> Int -> Int
 f = \a, b => a
 --f a b = a
 
+{-
+  TODO:
+    - separate expressions from value definitions
+    - make all location variables linear, one for values one for locations
+    - add function return (terminator expression)
+      + that would take a location and a value
+      + or it would take a variable
+         * this would need a new location expression type: function return value ; NO - it should use the after location
+-}
 
 -- put all values into variables
 myFun000_ok : Exp (Tup2 I64 I64)
@@ -121,6 +155,15 @@ myFun000_error =
   Let l2 (MkI64 101) $ \i2 =>
   MkTup2 i1 i2
 
+myFun000_error_sharing : Exp (Tup2 I64 I64)
+myFun000_error_sharing =
+  LetRegion $ \r =>
+  LetLoc (LocStart r) $ \l1, sl1 =>
+  LetLoc (LocAfterTag sl1) $ \l2, sl2 =>
+  -- create i64 values
+  Let l1 (MkI64 101) $ \i1 =>
+  Let l2 (MkTup2 i1 i1) $ \t1 =>
+  t1
 
 myFun000_error_why_is_ok : Exp (Tup2 I64 I64)
 myFun000_error_why_is_ok =
@@ -136,7 +179,7 @@ myFun00 : Exp (Tup2 I64 I64)
 myFun00 =
   LetRegion $ \r =>
   LetLoc (LocStart r) $ \l1, sl1 =>                  -- for the tag
-  LetLoc (LocAfterTag sl1) $ \l2, sl2 =>             -- for the second i64
+  LetLoc (LocAfterTag sl1) $ \l2, sl2 =>             -- for the first i64
   LetLoc (LocAfter I64 sl2) $ \l3, sl3 =>            -- for the second i64
   -- create i64 values
   Let l2 (MkI64 101) $ \i1 =>
@@ -162,7 +205,27 @@ myFun00Err =
 
   NOTE:
     the problem of the list of locations approach is that it fixes the layout and we want to support filed reordering, so the location language must support that
+
+
+  PROBLEM:
+    currently a tup2 I64 I64 representation can be arbitraty, but it will be written correctly due to locations,
+      but the consumer (reader) side might use a different layout,
+      for example the producer side could use a [TAG, trash, fst I64, trash, snd I64] layout
+      and the consumer side just would expect a packed [TAG, fst I64, snd I64] layout,
+      which would not work
+    to solve it the type and layout must be attached
+    Q: where to attach?
+      a) Ty
+      b) Exp  ; <=== I'd prefer this
+
+    Q: what would be the layout language?
+
+  LAYOUT MVP:
+    - force to use packed ; left to right layout ordering
+    - make it correct by construction
 -}
+
+
 myFun01 : Exp (Tup2 (Tup2 I64 I64) I64)
 myFun01 =
   LetRegion $ \r =>
@@ -196,11 +259,11 @@ data Arg : (sig : List Ty) -> Type where
 test2 : Arg [I64, I64]
 test2 = MkArg TT $ MkArg TT $ NilArg
 
-Fun : List Ty -> Ty -> Type
-Fun [] r = Exp r
-Fun (t::ts) r = Exp t -> Fun ts r
+FunTy : List Ty -> Ty -> Type
+FunTy [] r = Exp r
+FunTy (t::ts) r = Exp t -> FunTy ts r
 
-fn : Fun [I64, I64] I64
+fn : FunTy [I64, I64] I64
 fn = \a => \b => b
 
 {-
@@ -223,7 +286,7 @@ fn = \a => \b => b
   put either and tup2 and I64 into buffers
 -}
 
-myId : (1 x : a) -> a
+myId : (1 _ : a) -> a
 myId x =
   let a = x in
   -- let b = x in
