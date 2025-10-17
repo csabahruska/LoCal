@@ -1,3 +1,6 @@
+module LoCal
+
+public export
 data Ty
   = T0
   | Tup2 Ty Ty
@@ -24,19 +27,16 @@ data Ty
 -}
 
 
--- data IntList = Cons Int IntList
---              | Nil
-
-i64ListTy : Ty
-i64ListTy =
-  DecBox $ \t =>
-  DefBox t (Either (Tup2 I64 t) T0) t
-
+public export
 data Region : Type where
+  MkRegion : Int -> Region
 
-data Loc : (_ : Ty) -> (1 _ : Region) -> Type where
+public export
+data Loc : (t : Ty) -> (1 r : Region) -> Type where
+  MkLoc : Int -> Loc t r
 
-data LocExp : (1 _ : Region) -> Type where
+public export
+data LocExp : (1 r : Region) -> Type where
   LocStart    : (1 r : Region) -> LocExp r
   LocAfter    : Ty -> (1 _ : Loc _ r) -> LocExp r   -- Q: dynamically/runtime known? maybe a better name is RuntimeAfter ; A: NO!
   LocAfterTag : (1 _ : Loc _ r) -> LocExp r         -- statically known ; used for jump over the tag
@@ -75,15 +75,29 @@ data Fun : (arg : Ty) -> (res : Ty) -> Type
     + location for indirection
     + linear value types ; in Let
     + dup hoas primitive
+
+  IDEA:
+    locations are linear, values are not
+    sharing could be supported by recognizing non linear value usage
+    for duplicates instead of the value an indirection is written
+-}
+
+{-
+  sharing support:
+    - explicit indiretions, linear locations, DUP for locations to model indirection
+    - implicit sharing: use coercions for automatic DUP insertion
 -}
 
 {-
   TODO: refactor to
     - simple expression ; value definition
     - bind chain ; various lets, return value
+    + check this during hoas interpretation
+    + the last expression of a bind chain must be a hoas variable
 -}
+
+public export
 data Exp : (t : Ty) -> Type where
-  TT : Exp I64
 
   -- primitive values
   MkI64 : Int -> Exp I64
@@ -99,32 +113,28 @@ data Exp : (t : Ty) -> Type where
 
   -- location related
   LetRegion : (1 _ : (1 _ : Region) -> Exp a) -> Exp a
-  LetLoc : {t : Ty} -> (1 _ : LocExp r) -> (1 _ : (1 _ : Loc t r) -> Loc t r -> Exp a) -> Exp a -- Q: is this needed? use loc expressions for construction?
+  LetLoc : {t : Ty} -> (1 _ : LocExp r) -> (1 _ : (1 _ : Loc t r) -> (1 _ : Loc t r) -> Exp a) -> Exp a -- Q: is this needed? use loc expressions for construction?
 
   -- generic
   Let : (1 _ : Loc a _) -> Exp a -> (1 _ : Exp a -> Exp b) -> Exp b
+  Ret : (1 end_witness : Loc a _) -> Exp b -> Exp b
 
   FunApp : Fun arg res -> Exp arg -> Exp res
 
+  -- internal
+  Var : Int -> Exp a
+
+public export
 data Fun : (arg : Ty) -> (res : Ty) -> Type where
   MkFunId : Int -> Fun arg res
 
-data DefList : Type where
-  NilDef  : DefList
-  MkDec   : {arg : Ty} -> {res : Ty} -> (Fun arg res -> DefList) -> DefList
-  MkDef   : {arg : Ty} -> {res : Ty} -> Fun arg res -> (Exp arg -> Exp res) -> DefList -> DefList
+public export
+data Program : Type where
+  Main  : (main : Fun T0 res) -> Program
+  MkDec : {arg : Ty} -> {res : Ty} -> (Fun arg res -> Program) -> Program
+  MkDef : {arg : Ty} -> {res : Ty} -> Fun arg res -> (Exp arg -> Exp res) -> Program -> Program
 
 -- -------------------------------
-
-test : Int -> DefList
-test i =
-  MkDec $ \myFun1 =>
-  MkDef {arg = I64} myFun1 (\a => a) $
-  NilDef
-
-f : (1 _ : Int) -> Int -> Int
-f = \a, b => a
---f a b = a
 
 {-
   TODO:
@@ -136,67 +146,13 @@ f = \a, b => a
          * this would need a new location expression type: function return value ; NO - it should use the after location
 -}
 
--- put all values into variables
-myFun000_ok : Exp (Tup2 I64 I64)
-myFun000_ok =
-  LetRegion $ \r =>
-  LetLoc (LocStart r) $ \l1, sl1 =>
-  -- create i64 values
-  Let l1 (MkI64 101) $ \i1 =>
-  MkTup2 i1 i1
-
-myFun000_error : Exp (Tup2 I64 I64)
-myFun000_error =
-  LetRegion $ \r =>
-  LetLoc (LocStart r) $ \l1, sl1 =>
-  LetLoc (LocAfter I64 sl1) $ \l2, sl2 =>
-  -- create i64 values
-  Let l1 (MkI64 101) $ \i1 =>
-  Let l2 (MkI64 101) $ \i2 =>
-  MkTup2 i1 i2
-
-myFun000_error_sharing : Exp (Tup2 I64 I64)
-myFun000_error_sharing =
-  LetRegion $ \r =>
-  LetLoc (LocStart r) $ \l1, sl1 =>
-  LetLoc (LocAfterTag sl1) $ \l2, sl2 =>
-  -- create i64 values
-  Let l1 (MkI64 101) $ \i1 =>
-  Let l2 (MkTup2 i1 i1) $ \t1 =>
-  t1
-
-myFun000_error_why_is_ok : Exp (Tup2 I64 I64)
-myFun000_error_why_is_ok =
-  LetRegion $ \r =>
-  LetLoc (LocStart r) $ \l1, sl1 =>
-  -- create i64 values
-  Let l1 (MkI64 101) $ \i1 =>
-  LetLoc (LocAfter I64 sl1) $ \l2, sl2 =>
-  Let l2 (MkI64 101) $ \i2 =>
-  MkTup2 i1 i2
-
-myFun00 : Exp (Tup2 I64 I64)
-myFun00 =
-  LetRegion $ \r =>
-  LetLoc (LocStart r) $ \l1, sl1 =>                  -- for the tag
-  LetLoc (LocAfterTag sl1) $ \l2, sl2 =>             -- for the first i64
-  LetLoc (LocAfter I64 sl2) $ \l3, sl3 =>            -- for the second i64
-  -- create i64 values
-  Let l2 (MkI64 101) $ \i1 =>
-  Let l3 (MkI64 202) $ \i2 =>
-  -- create structures
-  Let l1 (MkTup2 i1 i2) $ \t1 =>
-  t1
-
-myFun00Err : Exp I64
-myFun00Err =
-  LetRegion $ \r =>
-  LetLoc (LocStart r) $ \l1, sl1 =>                  -- for the first i64
-  LetLoc (LocAfter I64 sl1) $ \l2, sl2 =>                  -- for the first i64
-  -- create i64 values
-  Let l1 (MkI64 101) $ \i1 =>
-  Let l2 (MkI64 101) $ \i2 =>
-  i1
+{-
+  TODO:
+    - write buffer based interpreter
+    - write C backend
+    - write example for function call
+  Q: should we distinguish register and memory values ; ref or immediate value?
+-}
 
 {-
   Q: how to express location relations?
@@ -226,27 +182,6 @@ myFun00Err =
 -}
 
 
-myFun01 : Exp (Tup2 (Tup2 I64 I64) I64)
-myFun01 =
-  LetRegion $ \r =>
-  LetLoc (LocStart r) $ \l1, sl1 =>           -- for tup2 tag
-  LetLoc (LocAfterTag sl1) $ \l2, sl2 =>      -- for the embedded tup2 tag
-  LetLoc (LocAfterTag sl2) $ \l3, sl3 =>      -- for the first i64
-  LetLoc (LocAfter I64 sl3) $ \l4, sl4 =>     -- for the middle i64
-  LetLoc (LocAfter I64 sl4) $ \l5, sl5 =>     -- for the third i64
-  -- create i64 values
-  Let l3 (MkI64 101) $ \i1 =>
-  Let l4 (MkI64 202) $ \i2 =>
-  Let l5 (MkI64 303) $ \i3 =>
-  -- create structures
-  Let l1 (MkTup2 i1 i2) $ \t1 =>
-  Let l2 (MkTup2 t1 i3) $ \t2 =>
-  t2
-  -- PROBLEM: location aliasing!!!!
-  --          each location should be written only once
-  --          if tup2 would have a runtime tag that would prevent location aliasing
-  --          that means that tup2 tag is irrelevant at runtime
-  --  SOLVED by requiring tag for Tup2
 
 -- -------------------------------
 
@@ -257,7 +192,7 @@ data Arg : (sig : List Ty) -> Type where
   MkArg : Exp t -> Arg s -> Arg (t :: s)
 
 test2 : Arg [I64, I64]
-test2 = MkArg TT $ MkArg TT $ NilArg
+test2 = MkArg (MkI64 1) $ MkArg (MkI64 2) $ NilArg
 
 FunTy : List Ty -> Ty -> Type
 FunTy [] r = Exp r
@@ -286,15 +221,25 @@ fn = \a => \b => b
   put either and tup2 and I64 into buffers
 -}
 
-myId : (1 _ : a) -> a
-myId x =
-  let a = x in
-  -- let b = x in
-  a
+{-
+  IDEA:
+    hybrid elaborator:
+      + edsl with type guarantees derived from meta language
+        example: usual functional language (L1 gibbon)
+      + edsl hoas interpreter that infers dsl types further
+        example: functional language with locations (L2 gibbon)
+                 the interpreter would insert locations
+                 the LoCal is a correct by construction language for locations, the interpreter would build it
+-}
 
+{-
+  TODO:
+    - create high level simple functional hoas edsl
+    - create interpreter that compiles the high level hoas edsl to LoCal edsl, with inferring and inserting locations
+-}
 
-v : Int
-v = let i = 1 in
-    let a = id i in
-    let b = id i in
-    b
+{-
+  INSIGHT:
+  - the interpreter might rely on a less typed IR for input, i.e. when linearity would be broken due to interpretation requirements
+  - locations might be pre interpreted before value allocations, so that the addresses would be already available
+-}
