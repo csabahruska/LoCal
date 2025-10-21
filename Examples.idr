@@ -108,6 +108,35 @@ myFun00 =
   Let l1 (MkTup2 i1 i2) $ \t1 =>
   Ret sl3 t1
 
+myFun00_fst : Exp (Tup2 I64 I64) -> Exp I64
+myFun00_fst t =
+  LetRegion $ \r =>
+  LetLoc (LocStart r) $ \l1, sl1 =>                  -- for the first i64
+  CaseFst t $ \i1 =>
+  Let l1 i1 $ \i2 => -- HINT: value copy between regions
+  Ret sl1 i2
+
+myFun00_snd : Exp (Tup2 I64 I64) -> Exp I64
+myFun00_snd t =
+  LetRegion $ \r =>
+  LetLoc (LocStart r) $ \l1, sl1 =>                  -- for the first i64
+  CaseSnd t $ \i1 =>
+  Let l1 i1 $ \i2 => -- HINT: value copy between regions
+  Ret sl1 i2
+
+{-
+  NOTE: currently locations are for output, such as value construction
+  Q: what about input locations?
+     what about function calls and location passing?
+     what about static and dynamic input/output locations at function calls?
+-}
+myFun00_app : Fun (Tup2 I64 I64) I64 -> Exp (Tup2 I64 I64) -> Exp I64
+myFun00_app f t =
+  LetRegion $ \r =>
+  LetLoc (LocStart r) $ \l1, sl1 =>                  -- for the first i64
+  Let l1 (FunApp f t) $ \i1 => -- HINT: value copy between regions
+  Ret sl1 i1
+
 myFun00Err : Exp I64
 myFun00Err =
   LetRegion $ \r =>
@@ -139,6 +168,31 @@ myFun01 =
   --          if tup2 would have a runtime tag that would prevent location aliasing
   --          that means that tup2 tag is irrelevant at runtime
   --  SOLVED by requiring tag for Tup2
+
+myFun02_right : Exp (Either I64 (Tup2 I64 I64))
+myFun02_right =
+  LetRegion $ \r =>
+  LetLoc (LocStart r) $ \l1, sl1 =>                  -- for the tag
+  LetLoc (LocAfterTag sl1) $ \l2, sl2 =>             -- for the tag
+  LetLoc (LocAfterTag sl2) $ \l3, sl3 =>             -- for the first i64
+  LetLoc (LocAfter I64 sl3) $ \l4, sl4 =>            -- for the second i64
+  -- create i64 values
+  Let l3 (MkI64 101) $ \i1 =>
+  Let l4 (MkI64 202) $ \i2 =>
+  -- create structures
+  Let l2 (MkTup2 i1 i2) $ \t1 =>
+  Let l1 (MkRight t1) $ \t2 =>
+  Ret sl4 t2
+
+myFun02_left : Exp (Either I64 (Tup2 I64 I64))
+myFun02_left =
+  LetRegion $ \r =>
+  LetLoc (LocStart r) $ \l1, sl1 =>                  -- for the tag
+  LetLoc (LocAfterTag sl1) $ \l2, sl2 =>             -- for the i64
+  -- create i64 values
+  Let l2 (MkI64 101) $ \i1 =>
+  Let l1 (MkLeft i1) $ \t1 =>
+  Ret sl2 t1
 
 myId : (1 _ : a) -> a
 myId x =

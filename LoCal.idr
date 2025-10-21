@@ -84,7 +84,7 @@ data Fun : (arg : Ty) -> (res : Ty) -> Type
 
 {-
   sharing support:
-    - explicit indiretions, linear locations, DUP for locations to model indirection
+    - explicit indirections, linear locations, DUP for locations to model indirection
     - implicit sharing: use coercions for automatic DUP insertion
 -}
 
@@ -107,9 +107,9 @@ data Exp : (t : Ty) -> Type where
   MkLeft  : Exp a -> Exp (Either a b)
   MkRight : Exp b -> Exp (Either a b)
 
-  CaseFst     : Exp (Tup2 a b)   -> (Loc a r -> Exp a -> Exp c) -> Exp c
-  CaseSnd     : Exp (Tup2 a b)   -> (Loc b r -> Exp b -> Exp c) -> Exp c
-  CaseEither  : Exp (Either a b) -> (Loc a r -> Exp a -> Exp c) -> (Loc b r -> Exp b -> Exp c) -> Exp c
+  CaseFst     : Exp (Tup2 a b)   -> (1 _ : Exp a -> Exp c) -> Exp c
+  CaseSnd     : Exp (Tup2 a b)   -> (1 _ : Exp b -> Exp c) -> Exp c
+  CaseEither  : Exp (Either a b) -> (1 _ : Exp a -> Exp c) -> (Exp b -> Exp c) -> Exp c
 
   -- location related
   LetRegion : (1 _ : (1 _ : Region) -> Exp a) -> Exp a
@@ -242,4 +242,30 @@ fn = \a => \b => b
   INSIGHT:
   - the interpreter might rely on a less typed IR for input, i.e. when linearity would be broken due to interpretation requirements
   - locations might be pre interpreted before value allocations, so that the addresses would be already available
+-}
+
+{-
+  INSIGHT:
+  - location is the descriptor where to find the data
+    + if it is static then to can turn to code
+    + if it is dynamic then it needs runtime interpretation
+
+  Q: is this a valid example?
+      create a value: Tup2 [garbage] fst snd
+      pass to a function to return the snd
+      Q: can the callee skip the [garbage]?
+      A: YES, if the input location is passed statically or dynamically
+
+  Q: can the target language implemented as a fully dynamic system that works with dynamic locations and buffers,
+     and with staging we could specialize the static parts of the programs?
+     would this be the same system as gibbon/LoCal?
+
+
+  IDEA/EXPERIMENT:
+    create a high level functional language that works without locations but runs on serialized representation,
+    where all locations are handled dynamically in an interpreter
+
+    INSIGHT:
+      the source code statically defines the constructed values and their positions, but in not serialized way,
+      but when the locations are derived only from source code then they are static also, because the source code is static
 -}

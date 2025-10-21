@@ -16,6 +16,9 @@ data FunDef : Type where
 
   INSIGHT:
     - locations are static relative positions in the region
+      + this is true for inferred, compile time/type level recursions, including function calls
+      + boxing and uncontrolled recursive function calls must return cursors, which are runtime loctations
+      Q: what is the precise relation between compile time (static) locations and runtime (dynamic) locations?
     - region is a base position in a buffer
     - locations are translated into static code during compilation, but it could be represented as a map during interpretation
 -}
