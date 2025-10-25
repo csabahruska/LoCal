@@ -268,4 +268,22 @@ fn = \a => \b => b
     INSIGHT:
       the source code statically defines the constructed values and their positions, but in not serialized way,
       but when the locations are derived only from source code then they are static also, because the source code is static
+
+
+  METHOD:
+    high level language (simple functional language)
+    interpreted on the target system's architecture (buffer based system)
+    everything is runtime
+    OUTCOME:
+      structured implementation
+      with staging the static parts we can get a compiler and an efficient but generic solution
+
+    Q: what if we use the LoCal language as an input and for interpretation?
+    INSIGHT: LoCal = high level language + locations
+
+    Q: what about interleaved garbage in the result data?
+    TODO:
+      - create a gibbon example for this, check the C code ; see: WritePackedFile
+        gibbon allocates garbage into a separate region, and it puts the output into the same region
+      - how will my interpreter handle this?
 -}
