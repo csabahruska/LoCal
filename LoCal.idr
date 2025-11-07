@@ -39,6 +39,8 @@ public export
 data LocExp : (1 r : Region) -> Type where
   LocStart    : (1 r : Region) -> LocExp r
   LocAfter    : Ty -> (1 _ : Loc _ r) -> LocExp r   -- Q: dynamically/runtime known? maybe a better name is RuntimeAfter ; A: NO!
+          --    ^ this should be a value variable instead of Ty, that would solve the sizeof problem with either's left/right
+          --    Q: what problem would it cause?
   LocAfterTag : (1 _ : Loc _ r) -> LocExp r         -- statically known ; used for jump over the tag
 
 data Fun : (arg : Ty) -> (res : Ty) -> Type
@@ -95,7 +97,7 @@ data Fun : (arg : Ty) -> (res : Ty) -> Type
     + check this during hoas interpretation
     + the last expression of a bind chain must be a hoas variable
 -}
-
+{-
 public export
 data Exp : (t : Ty) -> Type where
 
@@ -109,7 +111,7 @@ data Exp : (t : Ty) -> Type where
 
   CaseFst     : Exp (Tup2 a b)   -> (1 _ : Exp a -> Exp c) -> Exp c
   CaseSnd     : Exp (Tup2 a b)   -> (1 _ : Exp b -> Exp c) -> Exp c
-  CaseEither  : Exp (Either a b) -> (1 _ : Exp a -> Exp c) -> (Exp b -> Exp c) -> Exp c
+  CaseEither  : Exp (Either a b) -> (1 _ : Exp a -> Exp c) -> (1 _ : Exp b -> Exp c) -> Exp c
 
   -- location related
   LetRegion : (1 _ : (1 _ : Region) -> Exp a) -> Exp a
@@ -123,6 +125,34 @@ data Exp : (t : Ty) -> Type where
 
   -- internal
   Var : Int -> Exp a
+-}
+public export
+data Exp : (t : Ty) -> (r : Region) -> Type where
+
+  -- primitive values
+  MkI64 : Int -> Exp I64 r
+
+  -- value shapes, ADT can be modeled with these
+  MkTup2  : Exp a r -> Exp b r -> Exp (Tup2 a b) r
+  MkLeft  : Exp a r -> Exp (Either a b) r
+  MkRight : Exp b r -> Exp (Either a b) r
+
+  CaseFst     : Exp (Tup2 a b) r   -> (1 _ : Exp a r -> Exp c r_out) -> Exp c r_out
+  CaseSnd     : Exp (Tup2 a b) r   -> (1 _ : Exp b r -> Exp c r_out) -> Exp c r_out
+  CaseEither  : Exp (Either a b) r -> (1 _ : Exp a r -> Exp c r_out) -> (1 _ : Exp b r -> Exp c r_out) -> Exp c r_out
+
+  -- location related
+  LetRegion : (1 _ : (1 _ : Region) -> Exp a r) -> Exp a r
+  LetLoc : {t : Ty} -> (1 _ : LocExp r) -> (1 _ : (1 _ : Loc t r) -> (1 _ : Loc t r) -> Exp a r_out) -> Exp a r_out -- Q: is this needed? use loc expressions for construction?
+
+  -- generic
+  Let : (1 loc : Loc a r) -> Exp a r -> (1 _ : Exp a r -> Exp b r_out) -> Exp b r_out
+  --Ret : (1 end_witness : Loc a _) -> Exp b -> Exp b
+
+  FunApp : Fun arg res -> Exp arg r_in -> Exp res r_out
+
+  -- internal
+  Var : Int -> Exp a r
 
 public export
 data Fun : (arg : Ty) -> (res : Ty) -> Type where
@@ -132,7 +162,7 @@ public export
 data Program : Type where
   Main  : (main : Fun T0 res) -> Program
   MkDec : {arg : Ty} -> {res : Ty} -> (Fun arg res -> Program) -> Program
-  MkDef : {arg : Ty} -> {res : Ty} -> Fun arg res -> (Exp arg -> Exp res) -> Program -> Program
+  MkDef : {arg : Ty} -> {res : Ty} -> Fun arg res -> (Exp arg r_in -> Exp res r_out) -> Program -> Program
 
 -- -------------------------------
 
@@ -186,7 +216,7 @@ data Program : Type where
 -- -------------------------------
 
 -- multi arg modeling
-
+{-
 data Arg : (sig : List Ty) -> Type where
   NilArg : Arg Nil
   MkArg : Exp t -> Arg s -> Arg (t :: s)
@@ -200,7 +230,7 @@ FunTy (t::ts) r = Exp t -> FunTy ts r
 
 fn : FunTy [I64, I64] I64
 fn = \a => \b => b
-
+-}
 {-
   ingredients
     App - function + one argument

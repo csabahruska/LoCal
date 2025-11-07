@@ -1,0 +1,55 @@
+interpreter for a simple high level language, like LoCal without regions and locations
+regions and locations are the result of the interpretation
+
+interpreter model:
+  high level language: value construction/deconstruction, variables, functions, function calls
+
+Q: do we need types at all?
+A: no, everything is constructed from tup2 and either, T0 and I64
+
+representation: int buffer array
+
+TODO:
+  watch all gibbon videos
+    after that think through the neighboring cell location constraints
+    hopefully the presentation videos explain the layout constraints
+    video: https://youtu.be/aDIr-D5Lx08?si=qVdKPY2uG-3_Feku
+      - input and output locations are parameters of the function
+      - region is for types, i.e. tree ; every constructed typed value might be in a separate region
+      - pattern matching might need random access nodes
+      - end witness is telling where things end ; region + end witness describes a fully self contained serialized value
+
+    video: https://youtu.be/8Glj9HUgkxo?si=UCEAwZpICHiYoXD3
+      - copying gc removes indirections that are not required for sharing,
+        i.e. reverse list function creates fully pointer based structure that gc will make it compact
+
+    video: https://www.youtube.com/watch?v=E-LRy7YJu3o
+      - location calculus is based on Tuft's region calculus used by MLkit
+      - pipeline:
+        + infer locations
+        + find traversals ; does every function inspect all bytes of the input packed values?
+            - functions must process all packed inputs
+            - all pattern mached packed values must be inspected
+        + rand access
+            - collect input types of all functions which do not traverse their inputs
+            - add random access nodes to all such data types
+        + indirections
+            - fix unification failures with indirections
+        + route ends
+        + to cursors
+
+    video: https://www.youtube.com/watch?v=YDa60NpXp6Q
+      - first version, pretty limited, covers the basic case only and the core ideas of implementation. LoCal generalizes it way better.
+
+    video: https://www.youtube.com/watch?v=eeHYCq46nhE
+      - very similar ideas that were presented in the GC for gibbon presentation
+
+INSIGHT:
+  - a region contains a well typed data value.
+    + packed:         single region can contain multiple constructors
+    + pointer based:  single region can contain single constructor
+
+Q: could a copying gc contruct a serialized region if it would visit and copy data in the right order driven by the location constraints?
+
+NOTES:
+  what I know is that gibbon starts a new region when data constructor fields can not be neighbors
