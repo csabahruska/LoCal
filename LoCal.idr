@@ -137,14 +137,18 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
 --data Exp : (t : Ty) -> (r : Region) -> Type where
 
   -- Q: when to introduce new regions?
-  LetRegion : ((r : Region) -> Exp t loc) -> Exp t loc
+  LetRegion : (r : Region -> Exp t loc) -> Exp t loc
   Let : {loc_in : _} -> Exp a loc_in -> (Exp a loc_in -> Exp t loc) -> Exp t loc
 
   -- primops
   PrintI64 : {loc_arg : _} -> Exp I64 loc_arg -> Exp T0 loc
 
   -- indirection
-  MkInd : {loc_arg : _} -> Exp t loc_arg -> Exp (Ind t) loc_ind
+  MkInd : {loc_arg, loc_ind : Loc r} -> Exp t loc_arg -> Exp (Ind t) loc_ind -- within the same region
+  MkIndLong : Exp t loc_arg -> Exp (Ind t) loc_ind                           -- cross region
+
+  -- TODO: Copy -- to copy values cross region
+
   {-
   MkInd : {t : Ty} -> {loc_arg : _} ->
     let loc_ind = MkLE (LocInd loc_arg) in
@@ -156,7 +160,9 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
   -- value shapes, ADT can be modeled with these
   {-
     MkTup2 is the only place that introduces after relation between locations
-    TODO: add location tracking in Exp
+    IDEA:
+      - instead of LocAfter Ty we should use size which should be included in the Exp
+      - the Exp size could be used to define the region size also
   -}
   MkTup2 : {a, b : Ty} -> {loc : Loc r} ->
     let locFst = loc in
@@ -193,12 +199,6 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
 
   -- location related
   LetLoc : {t : Ty} -> (1 _ : LocExp r) -> (1 _ : (1 _ : Loc t r) -> (1 _ : Loc t r) -> Exp a r_out) -> Exp a r_out -- Q: is this needed? use loc expressions for construction?
-
-  -- generic
-  --Let : (1 loc : Loc a r) -> Exp a r -> (1 _ : Exp a r -> Exp b r_out) -> Exp b r_out
-
-  Let : (1 loc : Loc a r) -> Exp loc -> (1 _ : Exp loc -> Exp l_out) -> Exp l_out
-
   --Ret : (1 end_witness : Loc a _) -> Exp b -> Exp b
 
   FunApp : Fun arg res -> Exp arg r_in -> Exp res r_out

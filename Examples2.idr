@@ -71,11 +71,40 @@ sample_print_snd_fst =
   CaseSnd t1 $ \t2 =>
   CaseFst t2 $ \i =>
   PrintI64 i
+
 {-
-MkTup2 {r = ?r} {a = I64} {b = I64} {loc = ?loc}
-  (MkI64 {r = ?r} {loc = MkLE {r = ?r} (LocAfterTag {r = ?r} ?loc)} 101)
-  (MkI64 {r = ?r} {loc = MkLE {r = ?r} (LocAfter {r = ?r} I64 (MkLE {r = ?r} (LocAfterTag {r = ?r} ?loc)))} 201)
+  TODO:
+    sample for either
+    sample for decomposition and reuse substructure in a new tuple
 -}
+
+sample_new_tup_ind : {loc_out : _} -> Exp (Tup2 (Ind (Tup2 I64 I64)) (Ind (Tup2 I64 I64))) loc_out
+sample_new_tup_ind =
+  LetRegion $ \r =>
+  Let (sample_tup2_02 {loc = MkLE (LocStart r)}) $ \t1 =>
+  CaseSnd t1 $ \t2 =>
+  MkTup2 (MkIndLong t2) (MkIndLong t2)
+
+{-
+sample_new_tup_copy : {loc_out : _} -> Exp (Tup2 (Tup2 I64 I64) (Tup2 I64 I64)) loc_out
+sample_new_tup_copy =
+  LetRegion $ \r =>
+  Let (sample_tup2_02 {loc = MkLE (LocStart r)}) $ \t1 =>
+  CaseSnd t1 $ \t2 =>
+  MkTup2 t2 t2
+-}
+{-
+sample_new_tup_copy : {loc_out : _} -> Exp (Tup2 I64 I64) loc_out
+sample_new_tup_copy =
+  LetRegion $ \r =>
+  Let (sample_tup2_02 {loc = MkLE (LocStart r)}) $ \t1 =>
+  CaseSnd t1 $ \t2 =>
+  Copy t2
+-}
+
+sample_left_01 : {loc : _} -> Exp (Either (Tup2 I64 I64) I64) loc
+sample_left_01 = MkLeft sample_tup2_01
+
 
 partial sizeOf : Ty -> Int
 sizeOf I64 = 1
@@ -107,7 +136,8 @@ fill (CaseSnd _ cont) = fill (cont (Var 0))
 fill (PrintI64 {loc_arg} _) = "read " ++ show (locToIndex loc_arg) ++ " and PrintI64 ; "
 fill (LetRegion cont) = fill (cont (MkRegion 0)) -- TODO
 fill (Let {loc_in} a cont) = fill {loc=loc_in} a ++ fill (cont a)
+fill {loc} (MkLeft a) = "write Left tag to " ++ show (locToIndex loc) ++ " ; " ++ fill a
+fill {loc} (MkRight a) = "write Right tag to " ++ show (locToIndex loc) ++ " ; " ++ fill a
 
 partial toBuffer : Exp a (MkLE (LocStart (MkRegion 0))) -> String
 toBuffer e = fill e
-
