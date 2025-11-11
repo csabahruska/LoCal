@@ -53,3 +53,15 @@ Q: could a copying gc contruct a serialized region if it would visit and copy da
 
 NOTES:
   what I know is that gibbon starts a new region when data constructor fields can not be neighbors
+
+Q: does gibbon support sharing of unboxed ints or only for boxed types?
+A: create an example and check code => YES, sharing is only supported for tagged types and not for unboxed primitive types!
+
+TODO:
+  model taggedness in the type system in the embedded language type model
+
+IDEA: sharing support (only support low level IND)
+  do not support indirections fully in LoCal,
+  instead IND must be interpreted and handled explicitly,
+  so the dereference of IND must be explicitly handled in the program,
+  ideally this will be added by the high level abstraction that will translate ADTs and sharing to tuples and eithers and INDs and their interpretation

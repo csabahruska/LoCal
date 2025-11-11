@@ -8,6 +8,7 @@ data Ty
   | I64
   | DecBox (Ty -> Ty)
   | DefBox Ty Ty Ty
+  | Ind Ty -- raw pointer ; no tag ; just the location data
 
 {-
   INSIGHT:
@@ -31,17 +32,21 @@ public export
 data Region : Type where
   MkRegion : Int -> Region
 
+data LocExp : (1 r : Region) -> Type
+
 public export
-data Loc : (t : Ty) -> (1 r : Region) -> Type where
-  MkLoc : Int -> Loc t r
+data Loc : (1 r : Region) -> Type where
+  MkLoc : Int -> Loc r
+  MkLE  : LocExp r -> Loc r
 
 public export
 data LocExp : (1 r : Region) -> Type where
   LocStart    : (1 r : Region) -> LocExp r
-  LocAfter    : Ty -> (1 _ : Loc _ r) -> LocExp r   -- Q: dynamically/runtime known? maybe a better name is RuntimeAfter ; A: NO!
+  LocAfter    : Ty -> (1 _ : Loc r) -> LocExp r   -- Q: dynamically/runtime known? maybe a better name is RuntimeAfter ; A: NO!
           --    ^ this should be a value variable instead of Ty, that would solve the sizeof problem with either's left/right
           --    Q: what problem would it cause?
-  LocAfterTag : (1 _ : Loc _ r) -> LocExp r         -- statically known ; used for jump over the tag
+  LocAfterTag : (1 _ : Loc r) -> LocExp r         -- statically known ; used for jump over the tag
+--  LocInd      : (1 _ : Loc r) -> LocExp r
 
 data Fun : (arg : Ty) -> (res : Ty) -> Type
 
@@ -127,43 +132,88 @@ data Exp : (t : Ty) -> Type where
   Var : Int -> Exp a
 -}
 public export
-data Exp : (t : Ty) -> (r : Region) -> Type where
+--data Exp : (l : Type) -> Type where
+data Exp : (t : Ty) -> (loc : Loc r) -> Type where
+--data Exp : (t : Ty) -> (r : Region) -> Type where
 
+  -- primops
+  PrintI64 : {loc_arg : _} -> Exp I64 loc_arg -> Exp T0 loc
+
+  -- indirection
+  MkInd : {loc_arg : _} -> Exp t loc_arg -> Exp (Ind t) loc_ind
+  {-
+  MkInd : {t : Ty} -> {loc_arg : _} ->
+    let loc_ind = MkLE (LocInd loc_arg) in
+    Exp t loc_arg -> Exp t loc_ind
+  -}
   -- primitive values
-  MkI64 : Int -> Exp I64 r
+  MkI64 : Int -> Exp I64 loc
 
   -- value shapes, ADT can be modeled with these
-  MkTup2  : Exp a r -> Exp b r -> Exp (Tup2 a b) r
-  MkLeft  : Exp a r -> Exp (Either a b) r
-  MkRight : Exp b r -> Exp (Either a b) r
+  {-
+    MkTup2 is the only place that introduces after relation between locations
+    TODO: add location tracking in Exp
+  -}
+  MkTup2 : {a, b : Ty} -> {loc : Loc r} ->
+    let locFst = MkLE (LocAfterTag loc) in
+    let locSnd = MkLE (LocAfter a locFst) in
+    Exp a locFst -> Exp b locSnd -> Exp (Tup2 a b) loc
 
-  CaseFst     : Exp (Tup2 a b) r   -> (1 _ : Exp a r -> Exp c r_out) -> Exp c r_out
-  CaseSnd     : Exp (Tup2 a b) r   -> (1 _ : Exp b r -> Exp c r_out) -> Exp c r_out
-  CaseEither  : Exp (Either a b) r -> (1 _ : Exp a r -> Exp c r_out) -> (1 _ : Exp b r -> Exp c r_out) -> Exp c r_out
+  MkLeft  : {a, b : Ty} -> {loc : Loc r} ->
+    let locArg = MkLE (LocAfterTag loc) in
+    Exp a locArg -> Exp (Either a b) loc
+
+  MkRight : {a, b : Ty} -> {loc : Loc r} ->
+    let locArg = MkLE (LocAfterTag loc) in
+    Exp b locArg -> Exp (Either a b) loc
+
+{-
+  TODO:
+    every data access needs to be tested to Ind and do the dereference for it
+    INSIGHT: sharing poisons code, because requires interpretation
+-}
+  CaseFst : {a, c : Ty} -> {loc : Loc r} -> {loc_out : Loc r_out} -> Exp (Tup2 a b) loc ->
+            let locFst = MkLE (LocAfterTag loc) in
+            (1 _ : Exp a locFst -> Exp c loc_out) -> Exp c loc_out
+
+  CaseSnd : {a, b, c : Ty} -> {loc : Loc r} -> {loc_out : Loc r_out} -> Exp (Tup2 a b) loc ->
+            let locFst = MkLE (LocAfterTag loc) in
+            let locSnd = MkLE (LocAfter a locFst) in
+            (1 _ : Exp a locSnd -> Exp c loc_out) -> Exp c loc_out
+
+  CaseEither : {a, b, c : Ty} -> {loc : Loc r} -> {loc_out : Loc r_out} ->
+               Exp (Either a b) loc ->
+               let locArg = MkLE (LocAfterTag loc) in
+               (1 _ : Exp a locArg -> Exp c loc_out) -> (1 _ : Exp b locArg -> Exp c loc_out) -> Exp c loc_out
+{-
 
   -- location related
   LetRegion : (1 _ : (1 _ : Region) -> Exp a r) -> Exp a r
   LetLoc : {t : Ty} -> (1 _ : LocExp r) -> (1 _ : (1 _ : Loc t r) -> (1 _ : Loc t r) -> Exp a r_out) -> Exp a r_out -- Q: is this needed? use loc expressions for construction?
 
   -- generic
-  Let : (1 loc : Loc a r) -> Exp a r -> (1 _ : Exp a r -> Exp b r_out) -> Exp b r_out
+  --Let : (1 loc : Loc a r) -> Exp a r -> (1 _ : Exp a r -> Exp b r_out) -> Exp b r_out
+
+  Let : (1 loc : Loc a r) -> Exp loc -> (1 _ : Exp loc -> Exp l_out) -> Exp l_out
+
   --Ret : (1 end_witness : Loc a _) -> Exp b -> Exp b
 
   FunApp : Fun arg res -> Exp arg r_in -> Exp res r_out
+-}
 
   -- internal
-  Var : Int -> Exp a r
+  Var : Int -> Exp a loc
 
 public export
 data Fun : (arg : Ty) -> (res : Ty) -> Type where
   MkFunId : Int -> Fun arg res
-
+{-
 public export
 data Program : Type where
   Main  : (main : Fun T0 res) -> Program
   MkDec : {arg : Ty} -> {res : Ty} -> (Fun arg res -> Program) -> Program
   MkDef : {arg : Ty} -> {res : Ty} -> Fun arg res -> (Exp arg r_in -> Exp res r_out) -> Program -> Program
-
+-}
 -- -------------------------------
 
 {-
