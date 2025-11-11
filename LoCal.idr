@@ -20,8 +20,8 @@ data Ty
 
 {-
   REPRESENTATION:
-    - no tag:   I64
-    - has tag:  Tup2, Either
+    - no tag:   I64, Tup2
+    - has tag:  Either
 
   FUTURE WORK:
     - no tag for Tup2 ; problem to solve is location aliasing
@@ -136,6 +136,10 @@ public export
 data Exp : (t : Ty) -> (loc : Loc r) -> Type where
 --data Exp : (t : Ty) -> (r : Region) -> Type where
 
+  -- Q: when to introduce new regions?
+  LetRegion : ((r : Region) -> Exp t loc) -> Exp t loc
+  Let : {loc_in : _} -> Exp a loc_in -> (Exp a loc_in -> Exp t loc) -> Exp t loc
+
   -- primops
   PrintI64 : {loc_arg : _} -> Exp I64 loc_arg -> Exp T0 loc
 
@@ -155,7 +159,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
     TODO: add location tracking in Exp
   -}
   MkTup2 : {a, b : Ty} -> {loc : Loc r} ->
-    let locFst = MkLE (LocAfterTag loc) in
+    let locFst = loc in
     let locSnd = MkLE (LocAfter a locFst) in
     Exp a locFst -> Exp b locSnd -> Exp (Tup2 a b) loc
 
@@ -173,11 +177,11 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
     INSIGHT: sharing poisons code, because requires interpretation
 -}
   CaseFst : {a, c : Ty} -> {loc : Loc r} -> {loc_out : Loc r_out} -> Exp (Tup2 a b) loc ->
-            let locFst = MkLE (LocAfterTag loc) in
+            let locFst = loc in
             (1 _ : Exp a locFst -> Exp c loc_out) -> Exp c loc_out
 
   CaseSnd : {a, b, c : Ty} -> {loc : Loc r} -> {loc_out : Loc r_out} -> Exp (Tup2 a b) loc ->
-            let locFst = MkLE (LocAfterTag loc) in
+            let locFst = loc in
             let locSnd = MkLE (LocAfter a locFst) in
             (1 _ : Exp a locSnd -> Exp c loc_out) -> Exp c loc_out
 
@@ -188,7 +192,6 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
 {-
 
   -- location related
-  LetRegion : (1 _ : (1 _ : Region) -> Exp a r) -> Exp a r
   LetLoc : {t : Ty} -> (1 _ : LocExp r) -> (1 _ : (1 _ : Loc t r) -> (1 _ : Loc t r) -> Exp a r_out) -> Exp a r_out -- Q: is this needed? use loc expressions for construction?
 
   -- generic

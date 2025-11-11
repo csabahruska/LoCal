@@ -63,10 +63,13 @@ sample_print_snd =
   CaseSnd {loc=loc_in }{loc_out} t $ \i =>
   PrintI64 i
 -}
-sample_print_snd : {loc_out : _} -> Exp T0 loc_out
-sample_print_snd =
-  let t = sample_tup2_01_sharing in
-  CaseSnd {loc=loc_out }{loc_out} t $ \i =>
+
+sample_print_snd_fst : {loc_out : _} -> Exp T0 loc_out
+sample_print_snd_fst =
+  LetRegion $ \r =>
+  Let (sample_tup2_02 {loc = MkLE (LocStart r)}) $ \t1 =>
+  CaseSnd t1 $ \t2 =>
+  CaseFst t2 $ \i =>
   PrintI64 i
 {-
 MkTup2 {r = ?r} {a = I64} {b = I64} {loc = ?loc}
@@ -76,7 +79,7 @@ MkTup2 {r = ?r} {a = I64} {b = I64} {loc = ?loc}
 
 partial sizeOf : Ty -> Int
 sizeOf I64 = 1
-sizeOf (Tup2 a b) = 1 + sizeOf a + sizeOf b
+sizeOf (Tup2 a b) = sizeOf a + sizeOf b -- no tag for tup2
 
 partial locToIndex : Loc r -> Int
 locToIndex (MkLE (LocStart _)) = 0
@@ -97,34 +100,14 @@ data LocExp : (1 r : Region) -> Type where
 
 partial fill : {loc : _} -> Exp a loc -> String
 fill {loc} (MkI64 i) = "write " ++ show i ++ " to " ++ show (locToIndex loc) ++ " ; "
-fill {loc} (MkTup2 a b) =
-  "write Tup2TAG to " ++ show (locToIndex loc) ++ " ; " ++
-  fill a ++
-  fill b
+fill {loc} (MkTup2 a b) = fill a ++ fill b
 fill {loc} (MkInd {loc_arg} _) = "write IND " ++ show (locToIndex loc_arg) ++ " to " ++ show (locToIndex loc) ++ " ; "
 fill (CaseFst _ cont) = fill (cont (Var 0))
 fill (CaseSnd _ cont) = fill (cont (Var 0))
 fill (PrintI64 {loc_arg} _) = "read " ++ show (locToIndex loc_arg) ++ " and PrintI64 ; "
+fill (LetRegion cont) = fill (cont (MkRegion 0)) -- TODO
+fill (Let {loc_in} a cont) = fill {loc=loc_in} a ++ fill (cont a)
 
 partial toBuffer : Exp a (MkLE (LocStart (MkRegion 0))) -> String
 toBuffer e = fill e
---toBuffer (MkI64 i) = [i]
 
-{-
-  MkI64 : {loc : Loc r} -> Int -> Exp I64 loc
-
-  -- value shapes, ADT can be modeled with these
-  MkTup2 : {a, b : Ty} -> {loc : Loc r} ->
-    let locFst = MkLE (LocAfterTag loc) in
-    let locSnd = MkLE (LocAfter a locFst) in
-    Exp a locFst -> Exp b locSnd -> Exp (Tup2 a b) loc
-
-  CaseFst : {a, c : Ty} -> {loc : Loc r} -> {loc_out : Loc r_out} -> Exp (Tup2 a b) loc ->
-            let locFst = MkLE (LocAfterTag loc) in
-            (1 _ : Exp a locFst -> Exp c loc_out) -> Exp c loc_out
-
-  CaseSnd : {a, b, c : Ty} -> {loc : Loc r} -> {loc_out : Loc r_out} -> Exp (Tup2 a b) loc ->
-            let locFst = MkLE (LocAfterTag loc) in
-            let locSnd = MkLE (LocAfter a locFst) in
-            (1 _ : Exp a locSnd -> Exp c loc_out) -> Exp c loc_out
--}
