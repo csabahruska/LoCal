@@ -133,6 +133,9 @@ data Exp : (t : Ty) -> Type where
 -}
 public export
 --data Exp : (l : Type) -> Type where
+data Exp2 : (t : Ty) -> (loc : Loc r) -> (size : Int) -> Type
+
+public export
 data Exp : (t : Ty) -> (loc : Loc r) -> Type where
 --data Exp : (t : Ty) -> (r : Region) -> Type where
 

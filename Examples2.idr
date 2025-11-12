@@ -105,10 +105,13 @@ sample_new_tup_copy =
 sample_left_01 : {loc : _} -> Exp (Either (Tup2 I64 I64) I64) loc
 sample_left_01 = MkLeft sample_tup2_01
 
+sample_tup_either_01 : {loc : _} -> Exp (Tup2 (Either (Tup2 I64 I64) I64) I64) loc
+sample_tup_either_01 = MkTup2 (MkRight (MkI64 11)) (MkI64 222)
 
 partial sizeOf : Ty -> Int
 sizeOf I64 = 1
 sizeOf (Tup2 a b) = sizeOf a + sizeOf b -- no tag for tup2
+sizeOf (Either a b) = 1 + max (sizeOf a) (sizeOf b) -- HACK, because it compiles to tagged union
 
 partial locToIndex : Loc r -> Int
 locToIndex (MkLE (LocStart _)) = 0
