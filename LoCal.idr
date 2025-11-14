@@ -40,9 +40,32 @@ data Loc : (1 r : Region) -> Type where
   MkLE  : LocExp r -> Loc r
 
 public export
+data Size
+  = STup2 Size Size
+  | STag Size
+  | SInt Int
+  | D
+--  = S Int -- static size
+--  | D     -- dynamics size
+
+{-
+public export
+Num Size where
+  --(S a) + (S b) = S (a + b)
+  (+) = \_,_ => D
+  (*) = \_,_ => D
+  fromInteger = \i => SInt (fromInteger i)
+-}
+
+
+
+public export
 data LocExp : (1 r : Region) -> Type where
   LocStart    : (1 r : Region) -> LocExp r
-  LocAfter    : Ty -> (1 _ : Loc r) -> LocExp r   -- Q: dynamically/runtime known? maybe a better name is RuntimeAfter ; A: NO!
+  LocAfter    : Size -> (1 _ : Loc r) -> LocExp r   -- Q: dynamically/runtime known? maybe a better name is RuntimeAfter ; A: NO!
+                -- IDEA: location is not the right thing that descibes the next location
+                --        instead it would be the end witness of some value!
+                --        location + size-witness = end-witness
           --    ^ this should be a value variable instead of Ty, that would solve the sizeof problem with either's left/right
           --    Q: what problem would it cause?
   LocAfterTag : (1 _ : Loc r) -> LocExp r         -- statically known ; used for jump over the tag
@@ -131,26 +154,28 @@ data Exp : (t : Ty) -> Type where
   -- internal
   Var : Int -> Exp a
 -}
-public export
+--public export
 --data Exp : (l : Type) -> Type where
-data Exp2 : (t : Ty) -> (loc : Loc r) -> (size : Int) -> Type
+--data Exp2 : (t : Ty) -> (loc : Loc r) -> (size : Int) -> Type
 
+-- HINT: sizes are for 64 bit system in bytes
 public export
-data Exp : (t : Ty) -> (loc : Loc r) -> Type where
+data Exp : (t : Ty) -> (loc : Loc r) -> (size : Size) -> Type where
 --data Exp : (t : Ty) -> (r : Region) -> Type where
 
   -- Q: when to introduce new regions?
-  LetRegion : (r : Region -> Exp t loc) -> Exp t loc
-  Let : {loc_in : _} -> Exp a loc_in -> (Exp a loc_in -> Exp t loc) -> Exp t loc
+  LetRegion : (r : Region -> Exp t loc s) -> Exp t loc s
+  Let : {loc_in : _} -> Exp a loc_in s_in -> (Exp a loc_in s_in -> Exp t loc s) -> Exp t loc s
 
   -- primops
-  PrintI64 : {loc_arg : _} -> Exp I64 loc_arg -> Exp T0 loc
+  PrintI64 : {loc_arg : _} -> Exp I64 loc_arg (SInt 8) -> Exp T0 loc (SInt 0)
 
   -- indirection
-  MkInd : {loc_arg, loc_ind : Loc r} -> Exp t loc_arg -> Exp (Ind t) loc_ind -- within the same region
-  MkIndLong : Exp t loc_arg -> Exp (Ind t) loc_ind                           -- cross region
+  MkInd : {loc_arg, loc_ind : Loc r} -> Exp t loc_arg s -> Exp (Ind t) loc_ind (SInt 8) -- within the same region
+  MkIndLong : Exp t loc_arg s -> Exp (Ind t) loc_ind (SInt 8)                             -- cross region
 
-  -- TODO: Copy -- to copy values cross region
+  -- to copy values cross region
+  Copy : Exp t loc_arg s -> Exp t loc_ind s
 
   {-
   MkInd : {t : Ty} -> {loc_arg : _} ->
@@ -158,7 +183,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
     Exp t loc_arg -> Exp t loc_ind
   -}
   -- primitive values
-  MkI64 : Int -> Exp I64 loc
+  MkI64 : Int -> Exp I64 loc (SInt 8)
 
   -- value shapes, ADT can be modeled with these
   {-
@@ -167,37 +192,46 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
       - instead of LocAfter Ty we should use size which should be included in the Exp
       - the Exp size could be used to define the region size also
   -}
-  MkTup2 : {a, b : Ty} -> {loc : Loc r} ->
+  MkTup2 : {a, b : Ty} -> {a_s, b_s : Size} -> {loc : Loc r} ->
     let locFst = loc in
-    let locSnd = MkLE (LocAfter a locFst) in
-    Exp a locFst -> Exp b locSnd -> Exp (Tup2 a b) loc
+    let locSnd = MkLE (LocAfter a_s locFst) in
+    Exp a locFst a_s -> Exp b locSnd b_s -> Exp (Tup2 a b) loc (STup2 a_s b_s)
 
-  MkLeft  : {a, b : Ty} -> {loc : Loc r} ->
+  MkLeft  : {a, b : Ty} -> {s : Size} -> {loc : Loc r} ->
     let locArg = MkLE (LocAfterTag loc) in
-    Exp a locArg -> Exp (Either a b) loc
+    Exp a locArg s -> Exp (Either a b) loc (STag s)
 
-  MkRight : {a, b : Ty} -> {loc : Loc r} ->
+  MkRight : {a, b : Ty} -> {s : Size} -> {loc : Loc r} ->
     let locArg = MkLE (LocAfterTag loc) in
-    Exp b locArg -> Exp (Either a b) loc
+    Exp b locArg s -> Exp (Either a b) loc (STag s)
 
 {-
   TODO:
     every data access needs to be tested to Ind and do the dereference for it
     INSIGHT: sharing poisons code, because requires interpretation
 -}
-  CaseFst : {a, c : Ty} -> {loc : Loc r} -> {loc_out : Loc r_out} -> Exp (Tup2 a b) loc ->
+  PrjFst : {a, c : Ty} -> {s_a, s_out : Size} -> {loc : Loc r} -> {loc_out : Loc r_out} -> Exp (Tup2 a b) loc (STup2 s_a _) ->
             let locFst = loc in
-            (1 _ : Exp a locFst -> Exp c loc_out) -> Exp c loc_out
+            (1 _ : Exp a locFst s_a -> Exp c loc_out s_out) -> Exp c loc_out s_out
 
-  CaseSnd : {a, b, c : Ty} -> {loc : Loc r} -> {loc_out : Loc r_out} -> Exp (Tup2 a b) loc ->
+  PrjSnd : {a, b, c : Ty} -> {s_a, s_b, s_out : Size} -> {loc : Loc r} -> {loc_out : Loc r_out} -> Exp (Tup2 a b) loc (STup2 s_a s_b) ->
             let locFst = loc in
-            let locSnd = MkLE (LocAfter a locFst) in
-            (1 _ : Exp a locSnd -> Exp c loc_out) -> Exp c loc_out
+            let locSnd = MkLE (LocAfter s_a locFst) in
+            (1 _ : Exp b locSnd s_b -> Exp c loc_out s_out) -> Exp c loc_out s_out
 
-  CaseEither : {a, b, c : Ty} -> {loc : Loc r} -> {loc_out : Loc r_out} ->
-               Exp (Either a b) loc ->
+{-
+  IDEA:
+    - model custsors and end witnesses
+    - sizeof handling
+      + can generate end-witness at compile time from Ty                        ; compile time = end-witness value
+      + can genetrate end-witness producing runtime function at compile time    ; runtime      = end-witness function : value -> end-witness
+-}
+
+  CaseEither : {a, b, c : Ty} -> {s_a, s_b, s_out : Size} -> {loc : Loc r} -> {loc_out : Loc r_out} -> Exp (Either a b) loc (STag s_a) ->
                let locArg = MkLE (LocAfterTag loc) in
-               (1 _ : Exp a locArg -> Exp c loc_out) -> (1 _ : Exp b locArg -> Exp c loc_out) -> Exp c loc_out
+               (1 _ : Exp a locArg s_a -> Exp c loc_out s_out) -> (1 _ : Exp b locArg s_b -> Exp c loc_out s_out) -> Exp c loc_out s_out
+               -- PROBLEM/TODO: what if the output size differs?
+               -- IDEAS: is the result size an Either Int Int?
 {-
 
   -- location related
@@ -208,7 +242,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
 -}
 
   -- internal
-  Var : Int -> Exp a loc
+  Var : Int -> Exp a loc s
 
 public export
 data Fun : (arg : Ty) -> (res : Ty) -> Type where
