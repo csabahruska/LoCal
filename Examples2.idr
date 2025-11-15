@@ -55,7 +55,7 @@ sample_tup2_01_sharing =
 sample_tup2_02 : {loc : _} -> Exp (Tup2 (Tup2 I64 I64) (Tup2 I64 I64)) loc ?
 sample_tup2_02 = MkTup2 sample_tup2_01 sample_tup2_01
 
-sample_tup2_03 = sample_tup2_02 {loc = MkLE (LocStart (MkRegion 0))}
+--sample_tup2_03 = sample_tup2_02 {loc = MkLE (LocStart (MkRegion 0))}
 {-
 sample_print_snd : {loc_in : Loc _} -> {loc_out : _} -> Exp T0 loc_out
 sample_print_snd =
@@ -64,10 +64,23 @@ sample_print_snd =
   PrintI64 i
 -}
 
+
+newRegion : ((r : Region) -> Loc r -> Exp t l s) -> Exp t l s
+newRegion f = LetRegion $ \r => f r (MkLE (LocStart r))
+
+--newValue : Exp t l1 s -> (Exp t l1 s -> Exp t2 l2 s2) -> Exp t2 l2 s2
+--newValue e f = newRegion (\_, loc => Let {loc_in=loc} e $ \e2 => f e2)
+
 sample_print_snd_fst : {loc_out : _} -> Exp T0 loc_out ?
 sample_print_snd_fst =
-  LetRegion $ \r =>
-  Let (sample_tup2_02 {loc = MkLE (LocStart r)}) $ \t1 =>
+  --LetRegion $ \r =>
+  --Let (sample_tup2_02 {loc = MkLE (LocStart r)}) $ \t1 =>
+
+  newRegion $ \r, loc_in =>
+  Let {loc_in} sample_tup2_02 $ \t1 =>
+
+  --newValue sample_tup2_02 $ \t1 =>
+
   PrjSnd t1 $ \t2 =>
   PrjFst t2 $ \i =>
   PrintI64 i
@@ -99,6 +112,30 @@ sample_left_01 = MkLeft sample_tup2_01
 sample_tup_either_01 : {loc : _} -> Exp (Tup2 (Either (Tup2 I64 I64) I64) I64) loc ?
 sample_tup_either_01 = MkTup2 (MkRight (MkI64 11)) (MkI64 222)
 
+{-
+  TODO:
+    - fully dynamic cursor passing and size calculation
+    - interpreter based static improvements
+
+-}
+
+{-
+  TODO: either eliminator sample
+-}
+sample_print_either_elim : {loc_out : _} -> Exp T0 loc_out ?
+sample_print_either_elim =
+  newRegion $ \r, loc_in =>
+  Let {loc_in} sample_left_01 $ \e1 =>
+  -- INSIGHT: the size of the left side of the tuple {s_l} is unknown, it can be anything
+  -- PROBLEM: well, it is wrong! the left tup2 is prefrectly constructed, but the size information comes only from the deconstruction side
+  -- Q: how to fill it automatically?
+  -- basically it is unused part of the type, no constructor belongs to it
+  CaseEither {s_l = STup2 (SInt 0) ?} e1
+    (\l => PrintI64 (PrjSnd l id))
+    (\r => PrintI64 r)
+
+-- ----------------------------------------------
+
 partial sizeOf : Ty -> Int
 sizeOf I64 = 1
 sizeOf (Tup2 a b) = sizeOf a + sizeOf b -- no tag for tup2
@@ -126,13 +163,15 @@ data LocExp : (1 r : Region) -> Type where
   LocAfterTag : (1 _ : Loc r) -> LocExp r         -- statically known ; used for jump over the tag
 -}
 
+-- TODO: dynamic fill ; in a separate function
+-- static fill ; compiler
 partial fill : {loc : _} -> Exp a loc s -> String
 fill {loc} (MkI64 i) = "write " ++ show i ++ " to " ++ show (locToIndex loc) ++ " ; "
 fill {loc} (MkTup2 a b) = fill a ++ fill b
-fill {loc} (MkInd {loc_arg} _) = "write IND " ++ show (locToIndex loc_arg) ++ " to " ++ show (locToIndex loc) ++ " ; "
+fill {loc} (MkInd {loc_in} _) = "write IND " ++ show (locToIndex loc_in) ++ " to " ++ show (locToIndex loc) ++ " ; "
 fill (PrjFst _ cont) = fill (cont (Var 0))
 fill (PrjSnd _ cont) = fill (cont (Var 0))
-fill (PrintI64 {loc_arg} _) = "read " ++ show (locToIndex loc_arg) ++ " and PrintI64 ; "
+fill (PrintI64 {loc_in} _) = "read " ++ show (locToIndex loc_in) ++ " and PrintI64 ; "
 fill (LetRegion cont) = fill (cont (MkRegion 0)) -- TODO
 fill (Let {loc_in} a cont) = fill {loc=loc_in} a ++ fill (cont a)
 fill {loc} (MkLeft a) = "write Left tag to " ++ show (locToIndex loc) ++ " ; " ++ fill a
