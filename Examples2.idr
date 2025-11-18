@@ -130,6 +130,7 @@ sample_print_either_elim =
   -- PROBLEM: well, it is wrong! the left tup2 is prefrectly constructed, but the size information comes only from the deconstruction side
   -- Q: how to fill it automatically?
   -- basically it is unused part of the type, no constructor belongs to it
+  -- IDEA: with coercive subtyping we could implement lattice operations, so the type elaborator unification could calculate the lattice values also
   CaseEither {s_l = STup2 (SInt 0) ?} e1
     (\l => PrintI64 (PrjSnd l id))
     (\r => PrintI64 r)
@@ -164,6 +165,13 @@ data LocExp : (1 r : Region) -> Type where
 -}
 
 -- TODO: dynamic fill ; in a separate function
+{-
+  + the location expression tells how to serialize cursor passing
+  TODO:
+    - use monad stack to store region/cursor environment
+-}
+
+
 -- static fill ; compiler
 partial fill : {loc : _} -> Exp a loc s -> String
 fill {loc} (MkI64 i) = "write " ++ show i ++ " to " ++ show (locToIndex loc) ++ " ; "

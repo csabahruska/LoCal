@@ -24,7 +24,10 @@ data Ty
     - has tag:  Either
 
   FUTURE WORK:
-    - no tag for Tup2 ; problem to solve is location aliasing
+    - either should use only one bit tag
+      + implement packing of multiple tags into a byte or multiple bytes
+      + implement sub byte/word addressing but by tags and data
+    - add alignment control to locations
 -}
 
 
@@ -407,4 +410,41 @@ fn = \a => \b => b
       - create a gibbon example for this, check the C code ; see: WritePackedFile
         gibbon allocates garbage into a separate region, and it puts the output into the same region
       - how will my interpreter handle this?
+-}
+
+-- instances
+public export
+Eq Region where
+  (MkRegion a) == (MkRegion b) = a == b
+
+public export
+Ord Region where
+  compare (MkRegion a) (MkRegion b) = compare a b
+
+public export
+Eq Size where
+  STup2 a1 a2 == STup2 b1 b2 = a1 == b1 && a2 == b2
+  STag a == STag b = a == b
+  SInt a == SInt b = a == b
+  D == D = True
+  _ == _ = False
+
+-- ----------------------------------------------------
+
+import Language.Reflection.Pretty
+import Derive.Prelude
+
+%default total
+
+%language ElabReflection
+
+%runElab derive "Region" [Show,Eq,Ord]
+%runElab derive "Size" [Show,Eq,Ord]
+%runElab derive "LocExp" [Show,Eq,Ord]
+%runElab derive "Loc" [Show,Eq,Ord]
+{-
+  Region
+  Size
+  LocExp
+  Loc
 -}
