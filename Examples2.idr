@@ -1,5 +1,9 @@
 import LoCal
 import Instances
+import Data.SortedMap
+import Control.Monad.State
+
+
 -- data IntList = Cons Int IntList
 --              | Nil
 
@@ -112,12 +116,6 @@ sample_left_01 = MkLeft sample_tup2_01
 sample_tup_either_01 : {loc : _} -> Exp (Tup2 (Either (Tup2 I64 I64) I64) I64) loc ?
 sample_tup_either_01 = MkTup2 (MkRight (MkI64 11)) (MkI64 222)
 
-{-
-  TODO:
-    - fully dynamic cursor passing and size calculation
-    - interpreter based static improvements
-
--}
 
 {-
   TODO: either eliminator sample
@@ -164,14 +162,6 @@ data LocExp : (1 r : Region) -> Type where
   LocAfterTag : (1 _ : Loc r) -> LocExp r         -- statically known ; used for jump over the tag
 -}
 
--- TODO: dynamic fill ; in a separate function
-{-
-  + the location expression tells how to serialize cursor passing
-  TODO:
-    - use monad stack to store region/cursor environment
--}
-
-
 -- static fill ; compiler
 partial fill : {loc : _} -> Exp a loc s -> String
 fill {loc} (MkI64 i) = "write " ++ show i ++ " to " ++ show (locToIndex loc) ++ " ; "
@@ -187,3 +177,30 @@ fill {loc} (MkRight a) = "write Right tag to " ++ show (locToIndex loc) ++ " ; "
 
 partial toBuffer : Exp a (MkLE (LocStart (MkRegion 0))) s -> String
 toBuffer e = fill e
+
+{-
+  TODO:
+    - fully dynamic cursor passing and size calculation
+    - interpreter based static improvements
+
+-}
+
+-- TODO: dynamic fill ; in a separate function
+{-
+  + the location expression tells how to serialize cursor passing
+  TODO:
+    - use monad stack to store region/cursor environment
+-}
+
+record CG where
+  constructor MkCG
+  counter   : Int
+  locations : SortedMap LocVal String
+
+emptyCG : CG
+emptyCG = MkCG
+  { counter   = 0
+  , locations = empty
+  }
+
+M = State CG

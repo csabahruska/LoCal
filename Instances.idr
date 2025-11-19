@@ -1,6 +1,8 @@
 module Instances
 import LoCal
 
+import Decidable.Equality
+
 -- instances
 public export
 Eq Region where
@@ -9,6 +11,9 @@ Eq Region where
 public export
 Ord Region where
   compare (MkRegion a) (MkRegion b) = compare a b
+
+DecEq Region where
+  decEq = decEq @{FromEq}
 
 public export
 Eq Size where
@@ -76,9 +81,21 @@ mutual
     compare (MkLE a) (MkLE b) = compare a b
     compare a b = compare (ordTagLoc a) (ordTagLoc b)
 
-{-
-  done - Region
-  done - Size
-  done - LocExp
-  done - Loc
--}
+public export
+data LocVal : Type where
+  MkLocVal : (r : Region) -> Loc r -> LocVal
+
+partial public export
+Eq LocVal where
+  (MkLocVal a1 b1) == (MkLocVal a2 b2) = case decEq a1 a2 of
+    Yes Refl => b1 == b2
+    No _     => False
+
+partial public export
+Ord LocVal where
+  compare (MkLocVal a1 a2) (MkLocVal b1 b2) =
+    case compare a1 b1 of
+      EQ => case decEq a1 b1 of
+              Yes Refl => compare a2 b2
+      GT => GT
+      LT => LT
