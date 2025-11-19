@@ -1,5 +1,5 @@
 import LoCal
-
+import Instances
 -- data IntList = Cons Int IntList
 --              | Nil
 
