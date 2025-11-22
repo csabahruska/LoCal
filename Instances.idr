@@ -47,6 +47,7 @@ mutual
     (LocStart a) == (LocStart a) = True
     (LocAfter a1 b1) == (LocAfter a2 b2) = a1 == a2 && b1 == b2
     (LocAfterTag a) == (LocAfterTag b) = a == b
+    (LocTup2Fst a) == (LocTup2Fst b) = a == b
     _ == _ = False
 
   partial public export
@@ -63,6 +64,8 @@ ordTagLocExp : LocExp r -> Int
 ordTagLocExp (LocStart _)     = 0
 ordTagLocExp (LocAfter _ _)   = 1
 ordTagLocExp (LocAfterTag _)  = 2
+ordTagLocExp (LocTup2Fst _)   = 3
+
 
 mutual
   partial public export
@@ -73,7 +76,8 @@ mutual
       GT => GT
       LT => LT
     compare (LocAfterTag a) (LocAfterTag b) = compare a b
-    compare _ _ = EQ
+    compare (LocTup2Fst a) (LocTup2Fst b) = compare a b
+    compare a b = compare (ordTagLocExp a) (ordTagLocExp b)
 
   partial public export
   Ord (Loc r) where

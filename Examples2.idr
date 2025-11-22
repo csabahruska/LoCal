@@ -1,8 +1,9 @@
 import LoCal
 import Instances
 import Data.SortedMap
+import Data.String
 import Control.Monad.State
-
+import Data.Primitives.Interpolation
 
 -- data IntList = Cons Int IntList
 --              | Nil
@@ -54,6 +55,13 @@ sample_tup2_01_sharing =
   -- create i64 values
   let i1 = MkI64 101 in
   let l3 = MkTup2 i1 (MkInd i1) in
+  l3
+
+sample_tup2_01_sharing2 : {loc : _} -> Exp (Tup2 (Ind I64) I64) loc ?
+sample_tup2_01_sharing2 =
+  -- create i64 values
+  let i1 = MkI64 101 in
+  let l3 = MkTup2 (MkInd i1) i1  in
   l3
 
 sample_tup2_02 : {loc : _} -> Exp (Tup2 (Tup2 I64 I64) (Tup2 I64 I64)) loc ?
@@ -149,6 +157,7 @@ partial locToIndex : Loc r -> Int
 locToIndex (MkLE (LocStart _)) = 0
 locToIndex (MkLE (LocAfterTag l)) = 1 + locToIndex l
 locToIndex (MkLE (LocAfter s l)) = sizeToInt s + locToIndex l
+locToIndex (MkLE (LocTup2Fst l)) = 0 + locToIndex l
 
 {-
   MkLE  : LocExp r -> Loc r
@@ -163,7 +172,7 @@ data LocExp : (1 r : Region) -> Type where
 -}
 
 -- static fill ; compiler
-partial fill : {loc : _} -> Exp a loc s -> String
+partial fill : {r : _} -> {loc : Loc r} -> Exp a loc s -> String
 fill {loc} (MkI64 i) = "write " ++ show i ++ " to " ++ show (locToIndex loc) ++ " ; "
 fill {loc} (MkTup2 a b) = fill a ++ fill b
 fill {loc} (MkInd {loc_in} _) = "write IND " ++ show (locToIndex loc_in) ++ " to " ++ show (locToIndex loc) ++ " ; "
@@ -171,7 +180,7 @@ fill (PrjFst _ cont) = fill (cont (Var 0))
 fill (PrjSnd _ cont) = fill (cont (Var 0))
 fill (PrintI64 {loc_in} _) = "read " ++ show (locToIndex loc_in) ++ " and PrintI64 ; "
 fill (LetRegion cont) = fill (cont (MkRegion 0)) -- TODO
-fill (Let {loc_in} a cont) = fill {loc=loc_in} a ++ fill (cont a)
+fill (Let {r_in} {loc_in} a cont) = fill {r=r_in} {loc=loc_in} a ++ fill (cont a)
 fill {loc} (MkLeft a) = "write Left tag to " ++ show (locToIndex loc) ++ " ; " ++ fill a
 fill {loc} (MkRight a) = "write Right tag to " ++ show (locToIndex loc) ++ " ; " ++ fill a
 
@@ -194,13 +203,170 @@ toBuffer e = fill e
 
 record CG where
   constructor MkCG
-  counter   : Int
-  locations : SortedMap LocVal String
+  counter     : Int
+  locations   : SortedMap LocVal String
+  endwitness  : SortedMap LocVal String
+  locSize     : SortedMap LocVal Int
+  code        : List String
 
 emptyCG : CG
 emptyCG = MkCG
-  { counter   = 0
-  , locations = empty
+  { counter     = 0
+  , locations   = empty
+  , endwitness  = empty
+  , locSize     = empty
+  , code        = []
   }
 
-M = State CG
+M = StateT CG IO
+
+{-
+  IDEA:
+    do not use the Size argument of the LocAfter constructor,
+    instead every value should know it's size and provide it somehow to the locations that come after that
+-}
+
+newId : M Int
+newId = state (\m => ({counter $= (+ 1)} m, m.counter))
+
+newCursorName : M String
+newCursorName = pure "cur\{!newId}"
+
+emit : String -> M ()
+emit s = do
+  lift $ putStrLn s
+  modify {code $= (::) s}
+
+addCur : String -> LocVal -> M ()
+addCur c lv = modify {locations $= insert lv c}
+
+showLoc : Loc r -> String
+showLoc loc = case loc of
+  MkLE (LocStart (MkRegion ri)) => "LocStart \{ri}"
+  MkLE (LocAfter _ l ) => "LocAfter (\{showLoc l})"
+  MkLE (LocAfterTag l ) => "LocAfterTag (\{showLoc l})"
+  MkLE (LocTup2Fst l ) => "LocTup2Fst (\{showLoc l})"
+  MkLoc i => "MkLoc \{i}"
+
+Show (Loc r) where show = showLoc
+
+showRegion : Region -> String
+showRegion (MkRegion i) = "MkRegion \{i}"
+
+Show Region where show = showRegion
+
+showLocVal : LocVal -> String
+showLocVal (MkLocVal r l) = "MkLocVal (\{show r}) (\{show l})"
+
+Show LocVal where show = showLocVal
+
+-- TODO: check that it is written only once ; use an effect map for LocVals
+genCursor : {r : _} -> (loc : Loc r) -> M String
+genCursor {r} loc = do
+  lift $ putStrLn " !! gen cursor for \{showLoc loc}"
+  let lv  = MkLocVal r loc
+  {-
+    gen new if does not exist
+    return exisiting when available
+  -}
+  locs <- gets locations
+  sizes <- gets locSize
+  let newCur = do
+        c <- newCursorName
+        lift $ putStrLn " !! add cursor \{showLoc loc} => \{c}"
+        addCur c lv
+        pure c
+  case lookup lv !(gets locations) of
+    Just v  => pure v
+    Nothing => do
+      case loc of
+        MkLE (LocStart (MkRegion ri)) => assert_total $ idris_crash $ "INTERNAL ERROR: missing LocStart for region \{ri} locations: \{show locs}"
+        MkLE (LocAfter _ l ) => do
+          let lv = MkLocVal r l
+              Just size = lookup lv sizes
+                | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc size for \{show lv} locSize: \{show sizes}"
+          c <- newCur
+          emit "int *\{c} = (char*)\{!(genCursor l)} + \{size};"
+          pure c
+        MkLE (LocAfterTag l) => do
+          c <- newCur
+          emit "int *\{c} = (char*)\{!(genCursor l)} + 1;"
+          pure c
+        MkLE (LocTup2Fst l) => do
+          genCursor l
+        MkLoc _ => assert_total $ idris_crash $ "INTERNAL ERROR: MkLoc is not supported"
+
+--addStaticEndWitness : (loc : _) -> Int -> M ()
+--addStaticEndWitness _ _ = pure ()
+
+addStaticSize : {r : _} -> (loc : Loc r) -> Int -> M ()
+addStaticSize {r} l s = do
+  lift $ putStrLn " !! set size for \{showLoc l} = \{s}"
+  modify {locSize $= insert (MkLocVal r l) s}
+
+partial fillDyn : {r : _ } -> {loc : Loc r} -> Exp a loc s -> M ()
+fillDyn {r} {loc} (MkI64 i) = do
+  lift $ putStrLn " ++ MkI64 \{i}"
+  {-
+    TODO:
+      - gen location and store it on cg env
+      get cursor for the location
+      store
+  -}
+  addStaticSize loc 8       -- TODO: size or end witness?
+  cur <- genCursor loc
+  --addStaticEndWitness loc 8 -- TODO: which do we want?
+  emit "*(int*) \{cur} = \{i};"
+  pure ()
+{-
+  char *cur0 = ...;
+  *(int*)cur0 = i;
+
+    GibCursor after_tag_521 = loc_302 + 1;
+    *(GibInt *) after_tag_521 = 123;
+-}
+fillDyn {loc} (MkTup2 {a_s, b_s} a b) = do
+  lift $ putStrLn " ++ MkTup2"
+  addStaticSize loc $ sizeToInt a_s + sizeToInt b_s
+  fillDyn a
+  fillDyn b
+  -- TODO: make it better!!
+
+fillDyn {r} (MkInd {loc_in, loc_ind} i) = do
+  lift $ putStrLn " ++ MkInd"
+  addStaticSize loc_ind 8 -- 64 bit pointer
+  cur_in <- genCursor loc_in
+  cur_ind <- genCursor loc_ind
+  emit "*(int*) \{cur_ind} = \{cur_in};"
+
+--  MkInd : {loc_in, loc_ind : Loc r} -> Exp t loc_in s -> Exp (Ind t) loc_ind (SInt 8) -- within the same region
+--  MkIndLong : Exp t loc_in s -> Exp (Ind t) loc_ind (SInt 8)                             -- cross region
+
+{-
+allocRegion : M LocVal
+allocRegion = do
+  let r = MkRegion !newId
+  let lv = MkLocVal r (MkLE (LocStart r))
+  c <- newCursorName
+  emit "int *\{c} = newRegion();"
+  addCur c lv
+  pure lv
+-}
+
+partial toBufferDyn : Exp a (MkLE (LocStart (MkRegion (-1)))) s -> IO String
+toBufferDyn e = do
+  s <- execStateT emptyCG $ do
+            -- alloc main region
+            c <- newCursorName
+            emit "int *\{c} = newRegion();"
+            --let r   = MkRegion (-1)
+            --    loc = MkLE (LocStart (MkRegion (-1)))
+            addCur c (MkLocVal (MkRegion (-1)) (MkLE (LocStart (MkRegion (-1)))))
+            fillDyn {r=MkRegion (-1)} {loc=MkLE (LocStart (MkRegion (-1)))} e
+  pure $ unlines $ reverse s.code
+
+partial main : IO ()
+--main = putStr !(toBufferDyn i64)
+main = putStr !(toBufferDyn sample_tup2_02)
+--main = putStr !(toBufferDyn sample_tup2_01_sharing)
+--main = putStr !(toBufferDyn sample_tup2_01_sharing2)

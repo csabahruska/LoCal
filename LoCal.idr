@@ -73,6 +73,7 @@ data LocExp : (r : Region) -> Type where
           --    ^ this should be a value variable instead of Ty, that would solve the sizeof problem with either's left/right
           --    Q: what problem would it cause?
   LocAfterTag : (Loc r) -> LocExp r         -- statically known ; used for jump over the tag
+  LocTup2Fst : (Loc r) -> LocExp r
 --  LocInd      : (1 _ : Loc r) -> LocExp r
 
 data Fun : (arg : Ty) -> (res : Ty) -> Type
@@ -169,7 +170,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (size : Size) -> Type where
 
   -- Q: when to introduce new regions?
   LetRegion : (r : Region -> Exp t loc s) -> Exp t loc s
-  Let : {loc_in : _} -> Exp a loc_in s_in -> (Exp a loc_in s_in -> Exp t loc s) -> Exp t loc s
+  Let : {r_in : _} -> {loc_in : Loc r_in} -> Exp a loc_in s_in -> (Exp a loc_in s_in -> Exp t loc s) -> Exp t loc s
 
   -- primops
   PrintI64 : {loc_in : _} -> Exp I64 loc_in (SInt 8) -> Exp T0 loc (SInt 0)
@@ -197,7 +198,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (size : Size) -> Type where
       - the Exp size could be used to define the region size also
   -}
   MkTup2 : {a, b : Ty} -> {a_s, b_s : Size} -> {loc : Loc r} ->
-    let locFst = loc in
+    let locFst = MkLE (LocTup2Fst loc) in
     let locSnd = MkLE (LocAfter a_s locFst) in
     Exp a locFst a_s -> Exp b locSnd b_s -> Exp (Tup2 a b) loc (STup2 a_s b_s)
 
@@ -215,11 +216,11 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (size : Size) -> Type where
     INSIGHT: sharing poisons code, because requires interpretation
 -}
   PrjFst : {a, c : Ty} -> {s_a, s_out : Size} -> {loc : Loc r} -> {loc_out : Loc r_out} -> Exp (Tup2 a b) loc (STup2 s_a _) ->
-            let locFst = loc in
+            let locFst = MkLE (LocTup2Fst loc) in
             (Exp a locFst s_a -> Exp c loc_out s_out) -> Exp c loc_out s_out
 
   PrjSnd : {a, b, c : Ty} -> {s_a, s_b, s_out : Size} -> {loc : Loc r} -> {loc_out : Loc r_out} -> Exp (Tup2 a b) loc (STup2 s_a s_b) ->
-            let locFst = loc in
+            let locFst = MkLE (LocTup2Fst loc) in
             let locSnd = MkLE (LocAfter s_a locFst) in
             (Exp b locSnd s_b -> Exp c loc_out s_out) -> Exp c loc_out s_out
 
