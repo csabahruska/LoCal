@@ -67,6 +67,7 @@ public export
 data LocExp : (r : Region) -> Type where
   LocStart    : (r : Region) -> LocExp r
   LocAfter    : Size -> (Loc r) -> LocExp r   -- Q: dynamically/runtime known? maybe a better name is RuntimeAfter ; A: NO!
+                -- INSIGHT: if we would put Ty to this (instead of static size that would provide enough information to generate runtime function to calculate an endwitness
                 -- IDEA: location is not the right thing that descibes the next location
                 --        instead it would be the end witness of some value!
                 --        location + size-witness = end-witness
@@ -173,7 +174,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (size : Size) -> Type where
   Let : {r_in : _} -> {loc_in : Loc r_in} -> Exp a loc_in s_in -> (Exp a loc_in s_in -> Exp t loc s) -> Exp t loc s
 
   -- primops
-  PrintI64 : {loc_in : _} -> Exp I64 loc_in (SInt 8) -> Exp T0 loc (SInt 0)
+  PrintI64 : {r_in : _} -> {loc_in : Loc r_in} -> Exp I64 loc_in (SInt 8) -> Exp T0 loc (SInt 0)
 
   -- indirection
   MkInd : {loc_in, loc_ind : Loc r} -> Exp t loc_in s -> Exp (Ind t) loc_ind (SInt 8) -- within the same region
@@ -202,13 +203,13 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (size : Size) -> Type where
     let locSnd = MkLE (LocAfter a_s locFst) in
     Exp a locFst a_s -> Exp b locSnd b_s -> Exp (Tup2 a b) loc (STup2 a_s b_s)
 
-  MkLeft  : {a, b : Ty} -> {s : Size} -> {loc : Loc r} ->
+  MkLeft  : {a, b : Ty} -> {s_a : Size} -> {loc : Loc r} ->
     let locArg = MkLE (LocAfterTag loc) in
-    Exp a locArg s -> Exp (Either a b) loc (STag s)
+    Exp a locArg s_a -> Exp (Either a b) loc (STag s_a)
 
-  MkRight : {a, b : Ty} -> {s : Size} -> {loc : Loc r} ->
+  MkRight : {a, b : Ty} -> {s_b : Size} -> {loc : Loc r} ->
     let locArg = MkLE (LocAfterTag loc) in
-    Exp b locArg s -> Exp (Either a b) loc (STag s)
+    Exp b locArg s_b -> Exp (Either a b) loc (STag s_b)
 
 {-
   TODO:

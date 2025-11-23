@@ -339,8 +339,42 @@ fillDyn {r} (MkInd {loc_in, loc_ind} i) = do
   cur_ind <- genCursor loc_ind
   emit "*(int*) \{cur_ind} = \{cur_in};"
 
---  MkInd : {loc_in, loc_ind : Loc r} -> Exp t loc_in s -> Exp (Ind t) loc_ind (SInt 8) -- within the same region
+fillDyn {loc} (MkLeft {s_a} a) = do
+  lift $ putStrLn " ++ MkLeft"
+  addStaticSize loc $ 1 + sizeToInt s_a
+  fillDyn a
+
+fillDyn {loc} (MkRight {s_b} b) = do
+  lift $ putStrLn " ++ MkRight"
+  addStaticSize loc $ 1 + sizeToInt s_b
+  fillDyn b
+
+fillDyn (PrjFst _ cont) = fillDyn (cont (Var 0)) -- Q: is Var unused? why? is the location that track values instead of binder names?
+fillDyn (PrjSnd _ cont) = fillDyn (cont (Var 0)) -- Q: is Var unused? why? is the location that track values instead of binder names?
+
+fillDyn {loc} (PrintI64 {r_in, loc_in} _) = do
+  lift $ putStrLn " ++ PrintI64"
+  addStaticSize loc 0
+  cur_in <- genCursor {r=r_in} loc_in
+  emit "printf(\"%ld\\n\", *(int*) \{cur_in});"
+
+fillDyn (LetRegion cont) = do
+  c <- newCursorName
+  emit "int *\{c} = newRegion();"
+  let r   = MkRegion !newId
+      loc = MkLE (LocStart r)
+  addCur c (MkLocVal r loc)
+  fillDyn (cont r)
+
+fillDyn (Let {r_in} {loc_in} a cont) = fillDyn {r=r_in} {loc=loc_in} a >> fillDyn (cont a)
+
+-- TODO:
 --  MkIndLong : Exp t loc_in s -> Exp (Ind t) loc_ind (SInt 8)                             -- cross region
+--  Copy : Exp t loc_in s -> Exp t loc s
+--  CaseEither : {a, b, c : Ty} -> {s, s_l, s_r, s_out : Size} -> {loc : Loc r} -> {loc_out : Loc r_out} -> Exp (Either a b) loc (STag s) {-(SEither s_l s_r)-} ->
+--               let locArg = MkLE (LocAfterTag loc) in
+--               (Exp a locArg s_l -> Exp c loc_out s_out) -> (Exp b locArg s_r -> Exp c loc_out s_out) -> Exp c loc_out s_out
+
 
 {-
 allocRegion : M LocVal
@@ -355,6 +389,7 @@ allocRegion = do
 
 partial toBufferDyn : Exp a (MkLE (LocStart (MkRegion (-1)))) s -> IO String
 toBufferDyn e = do
+  putStrLn " ---- CODEGEN ----"
   s <- execStateT emptyCG $ do
             -- alloc main region
             c <- newCursorName
@@ -363,10 +398,33 @@ toBufferDyn e = do
             --    loc = MkLE (LocStart (MkRegion (-1)))
             addCur c (MkLocVal (MkRegion (-1)) (MkLE (LocStart (MkRegion (-1)))))
             fillDyn {r=MkRegion (-1)} {loc=MkLE (LocStart (MkRegion (-1)))} e
+  putStrLn " ---- CODE OUTPUT ----"
   pure $ unlines $ reverse s.code
 
 partial main : IO ()
---main = putStr !(toBufferDyn i64)
-main = putStr !(toBufferDyn sample_tup2_02)
---main = putStr !(toBufferDyn sample_tup2_01_sharing)
---main = putStr !(toBufferDyn sample_tup2_01_sharing2)
+{-
+sample_new_tup_ind : {loc_out : _} -> Exp (Tup2 (Ind (Tup2 I64 I64)) (Ind (Tup2 I64 I64))) loc_out ?
+sample_new_tup_copy : {loc_out : _} -> Exp (Tup2 I64 I64) loc_out ?
+sample_print_either_elim : {loc_out : _} -> Exp T0 loc_out ?
+-}
+
+{-
+  TODO:
+    - remove usage of Size in dynamic cursor backend,
+      instead add Ty to LocAfter and generate runtime endwitness calculator code
+    - complete codegen to handle all Exp constructors
+-}
+
+main = do
+  {-
+  putStr !(toBufferDyn i64)
+  putStr !(toBufferDyn sample_tup2_01)
+  putStr !(toBufferDyn sample_tup2_01_sharing)
+  putStr !(toBufferDyn sample_tup2_01_sharing2)
+  putStr !(toBufferDyn sample_tup2_02)
+  putStr !(toBufferDyn sample_left_01)
+  putStr !(toBufferDyn sample_tup_either_01)
+  putStr !(toBufferDyn sample_print_snd_fst)
+  -}
+  putStr !(toBufferDyn sample_print_snd_fst)
+  --putStr !(toBufferDyn sample_new_tup_ind)
