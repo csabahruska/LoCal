@@ -66,7 +66,7 @@ Num Size where
 public export
 data LocExp : (r : Region) -> Type where
   LocStart    : (r : Region) -> LocExp r
-  LocAfter    : Size -> (Loc r) -> LocExp r   -- Q: dynamically/runtime known? maybe a better name is RuntimeAfter ; A: NO!
+  LocAfter    : Ty -> Size -> (Loc r) -> LocExp r   -- Q: dynamically/runtime known? maybe a better name is RuntimeAfter ; A: NO!
                 -- INSIGHT: if we would put Ty to this (instead of static size that would provide enough information to generate runtime function to calculate an endwitness
                 -- IDEA: location is not the right thing that descibes the next location
                 --        instead it would be the end witness of some value!
@@ -200,7 +200,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (size : Size) -> Type where
   -}
   MkTup2 : {a, b : Ty} -> {a_s, b_s : Size} -> {loc : Loc r} ->
     let locFst = MkLE (LocTup2Fst loc) in
-    let locSnd = MkLE (LocAfter a_s locFst) in
+    let locSnd = MkLE (LocAfter a a_s locFst) in
     Exp a locFst a_s -> Exp b locSnd b_s -> Exp (Tup2 a b) loc (STup2 a_s b_s)
 
   MkLeft  : {a, b : Ty} -> {s_a : Size} -> {loc : Loc r} ->
@@ -222,7 +222,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (size : Size) -> Type where
 
   PrjSnd : {a, b, c : Ty} -> {s_a, s_b, s_out : Size} -> {loc : Loc r} -> {loc_out : Loc r_out} -> Exp (Tup2 a b) loc (STup2 s_a s_b) ->
             let locFst = MkLE (LocTup2Fst loc) in
-            let locSnd = MkLE (LocAfter s_a locFst) in
+            let locSnd = MkLE (LocAfter a s_a locFst) in
             (Exp b locSnd s_b -> Exp c loc_out s_out) -> Exp c loc_out s_out
 
 {-
