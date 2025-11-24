@@ -14,7 +14,7 @@ Ord Region where
 
 DecEq Region where
   decEq = decEq @{FromEq}
-
+{-
 public export
 Eq Size where
   STup2 a1 a2 == STup2 b1 b2 = a1 == b1 && a2 == b2
@@ -40,12 +40,12 @@ Ord Size where
   compare (SInt a) (SInt b) = compare a b
   compare D D = EQ
   compare a b = compare (ordTagSize a) (ordTagSize b)
-
+-}
 mutual
   partial public export
   Eq (LocExp r) where
     (LocStart a) == (LocStart a) = True
-    (LocAfter a1 b1) == (LocAfter a2 b2) = a1 == a2 && b1 == b2
+    (LocAfter _ _ a) == (LocAfter _ _ b) = a == b -- HINT: Ty and Size does not matter
     (LocAfterTag a) == (LocAfterTag b) = a == b
     (LocTup2Fst a) == (LocTup2Fst b) = a == b
     _ == _ = False
@@ -62,7 +62,7 @@ ordTagLoc (MkLE _)  = 1
 
 ordTagLocExp : LocExp r -> Int
 ordTagLocExp (LocStart _)     = 0
-ordTagLocExp (LocAfter _ _)   = 1
+ordTagLocExp (LocAfter _ _ _) = 1
 ordTagLocExp (LocAfterTag _)  = 2
 ordTagLocExp (LocTup2Fst _)   = 3
 
@@ -71,10 +71,7 @@ mutual
   partial public export
   Ord (LocExp r) where
     compare (LocStart a) (LocStart a) = EQ
-    compare (LocAfter a1 b1) (LocAfter a2 b2) = case compare a1 a2 of
-      EQ => compare b1 b2
-      GT => GT
-      LT => LT
+    compare (LocAfter _ _ a) (LocAfter _ _ b) = compare a b -- HINT: Ty and Size does not matter
     compare (LocAfterTag a) (LocAfterTag b) = compare a b
     compare (LocTup2Fst a) (LocTup2Fst b) = compare a b
     compare a b = compare (ordTagLocExp a) (ordTagLocExp b)
