@@ -47,22 +47,19 @@ sample_tup2_01 =
   -- create i64 values
   let i1 = MkI64 101 in
   let i2 = MkI64 201 in
-  let l3 = MkTup2 i1 i2 in
-  l3
+  MkTup2 i1 i2
 
 sample_tup2_01_sharing : {loc : _} -> Exp (Tup2 I64 (Ind I64)) loc ?
 sample_tup2_01_sharing =
   -- create i64 values
   let i1 = MkI64 101 in
-  let l3 = MkTup2 i1 (MkInd i1) in
-  l3
+  MkTup2 i1 (MkInd i1)
 
 sample_tup2_01_sharing2 : {loc : _} -> Exp (Tup2 (Ind I64) I64) loc ?
 sample_tup2_01_sharing2 =
   -- create i64 values
   let i1 = MkI64 101 in
-  let l3 = MkTup2 (MkInd i1) i1  in
-  l3
+  MkTup2 (MkInd i1) i1
 
 sample_tup2_02 : {loc : _} -> Exp (Tup2 (Tup2 I64 I64) (Tup2 I64 I64)) loc ?
 sample_tup2_02 = MkTup2 sample_tup2_01 sample_tup2_01
@@ -208,6 +205,7 @@ record CG where
   endwitness  : SortedMap LocVal String
   locSize     : SortedMap LocVal Int
   code        : List String
+  indentLevel : Nat
 
 emptyCG : CG
 emptyCG = MkCG
@@ -216,6 +214,7 @@ emptyCG = MkCG
   , endwitness  = empty
   , locSize     = empty
   , code        = []
+  , indentLevel = 0
   }
 
 M = StateT CG IO
@@ -232,10 +231,19 @@ newId = state (\m => ({counter $= (+ 1)} m, m.counter))
 newCursorName : M String
 newCursorName = pure "cur\{!newId}"
 
+indent : M a -> M a
+indent m = do
+  l <- gets (.indentLevel)
+  modify {indentLevel $= (+ 1)}
+  res <- m
+  modify {indentLevel := l}
+  pure res
+
 emit : String -> M ()
 emit s = do
+  cg <- get
   lift $ putStrLn s
-  modify {code $= (::) s}
+  modify {code $= (::) (indent (cg.indentLevel * 2) s)}
 
 addCur : String -> LocVal -> M ()
 addCur c lv = modify {locations $= insert lv c}
@@ -339,13 +347,22 @@ fillDyn {r} (MkInd {loc_in, loc_ind} i) = do
   cur_ind <- genCursor loc_ind
   emit "*(int*) \{cur_ind} = \{cur_in};"
 
+fillDyn {r} (MkIndLong {r_in, loc_in, loc_ind} i) = do
+  lift $ putStrLn " ++ MkInd"
+  addStaticSize loc_ind 8 -- 64 bit pointer
+  cur_in <- genCursor {r=r_in} loc_in
+  cur_ind <- genCursor loc_ind
+  emit "*(int*) \{cur_ind} = \{cur_in};"
+
 fillDyn {loc} (MkLeft {s_a} a) = do
   lift $ putStrLn " ++ MkLeft"
+  emit "*(int*) \{!(genCursor loc)} = 0; // LEFT_TAG"
   addStaticSize loc $ 1 + sizeToInt s_a
   fillDyn a
 
 fillDyn {loc} (MkRight {s_b} b) = do
   lift $ putStrLn " ++ MkRight"
+  emit "*(int*) \{!(genCursor loc)} = 1; // RIGHT_TAG"
   addStaticSize loc $ 1 + sizeToInt s_b
   fillDyn b
 
@@ -367,6 +384,27 @@ fillDyn (LetRegion cont) = do
   fillDyn (cont r)
 
 fillDyn (Let {r_in} {loc_in} a cont) = fillDyn {r=r_in} {loc=loc_in} a >> fillDyn (cont a)
+
+fillDyn {loc, s} (CaseEither scrut cont_left cont_right) = do
+  lift $ putStrLn " ++ CaseEither"
+  addStaticSize loc $ 1 + sizeToInt s
+  cur_tag <- genCursor loc
+  emit "if (*(int*) \{cur_tag} == 0) { // LEFT"
+  indent $ fillDyn (cont_left (Var 0)) -- Q: FIX?
+  emit "} else { // RIGHT"
+  indent $ fillDyn (cont_right (Var 0)) -- Q: FIX?
+  emit "}"
+
+fillDyn {loc, s} (Copy {r_in, loc_in} src) = do
+  lift $ putStrLn " ++ Copy"
+  let bytes = sizeToInt s
+  addStaticSize loc bytes
+  addStaticSize loc_in bytes
+  cur_src <- genCursor loc_in
+  cur_dst <- genCursor loc
+  emit "memcpy(\{cur_dst}, \{cur_src}, \{bytes});"
+
+fillDyn (Var _) = assert_total $ idris_crash $ "Var"
 
 -- TODO:
 --  MkIndLong : Exp t loc_in s -> Exp (Ind t) loc_ind (SInt 8)                             -- cross region
@@ -402,11 +440,6 @@ toBufferDyn e = do
   pure $ unlines $ reverse s.code
 
 partial main : IO ()
-{-
-sample_new_tup_ind : {loc_out : _} -> Exp (Tup2 (Ind (Tup2 I64 I64)) (Ind (Tup2 I64 I64))) loc_out ?
-sample_new_tup_copy : {loc_out : _} -> Exp (Tup2 I64 I64) loc_out ?
-sample_print_either_elim : {loc_out : _} -> Exp T0 loc_out ?
--}
 
 {-
   TODO:
@@ -425,6 +458,7 @@ main = do
   putStr !(toBufferDyn sample_left_01)
   putStr !(toBufferDyn sample_tup_either_01)
   putStr !(toBufferDyn sample_print_snd_fst)
+  putStr !(toBufferDyn sample_new_tup_ind)
+  putStr !(toBufferDyn sample_new_tup_copy)
   -}
-  putStr !(toBufferDyn sample_print_snd_fst)
-  --putStr !(toBufferDyn sample_new_tup_ind)
+  putStr !(toBufferDyn sample_print_either_elim)

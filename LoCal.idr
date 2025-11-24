@@ -178,10 +178,10 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (size : Size) -> Type where
 
   -- indirection
   MkInd : {loc_in, loc_ind : Loc r} -> Exp t loc_in s -> Exp (Ind t) loc_ind (SInt 8) -- within the same region
-  MkIndLong : Exp t loc_in s -> Exp (Ind t) loc_ind (SInt 8)                             -- cross region
+  MkIndLong : {r_in : _} -> {loc_in : Loc r_in} -> Exp t loc_in s -> Exp (Ind t) loc_ind (SInt 8)                             -- cross region
 
   -- to copy values cross region
-  Copy : Exp t loc_in s -> Exp t loc s
+  Copy : {s : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp t loc_in s -> Exp t loc s
 
   {-
   MkInd : {t : Ty} -> {loc_arg : _} ->
