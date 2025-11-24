@@ -123,11 +123,11 @@ genCursor {r} loc = do
               Just size = lookup lv sizes
                 | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc size for \{show lv} locSize: \{show sizes}"
           c <- newCur
-          emit "int *\{c} = (char*)\{!(genCursor l)} + \{size};"
+          emit "char *\{c} = (char*)\{!(genCursor l)} + \{size};"
           pure c
         MkLE (LocAfterTag l) => do
           c <- newCur
-          emit "int *\{c} = (char*)\{!(genCursor l)} + 1;"
+          emit "char *\{c} = (char*)\{!(genCursor l)} + 1;"
           pure c
         MkLE (LocTup2Fst l) => do
           genCursor l
@@ -174,24 +174,24 @@ fillDyn {r} (MkInd {loc_in, loc_ind} i) = do
   addStaticSize loc_ind 8 -- 64 bit pointer
   cur_in <- genCursor loc_in
   cur_ind <- genCursor loc_ind
-  emit "*(int*) \{cur_ind} = \{cur_in};"
+  emit "*(char*) \{cur_ind} = \{cur_in};"
 
 fillDyn {r} (MkIndLong {r_in, loc_in, loc_ind} i) = do
-  lift $ putStrLn " ++ MkInd"
+  lift $ putStrLn " ++ MkIndLong"
   addStaticSize loc_ind 8 -- 64 bit pointer
   cur_in <- genCursor {r=r_in} loc_in
   cur_ind <- genCursor loc_ind
-  emit "*(int*) \{cur_ind} = \{cur_in};"
+  emit "*(char*) \{cur_ind} = \{cur_in};"
 
 fillDyn {loc} (MkLeft {s_a} a) = do
   lift $ putStrLn " ++ MkLeft"
-  emit "*(int*) \{!(genCursor loc)} = 0; // LEFT_TAG"
+  emit "*(char*) \{!(genCursor loc)} = 0; // LEFT_TAG"
   addStaticSize loc $ 1 + sizeToInt s_a
   fillDyn a
 
 fillDyn {loc} (MkRight {s_b} b) = do
   lift $ putStrLn " ++ MkRight"
-  emit "*(int*) \{!(genCursor loc)} = 1; // RIGHT_TAG"
+  emit "*(char*) \{!(genCursor loc)} = 1; // RIGHT_TAG"
   addStaticSize loc $ 1 + sizeToInt s_b
   fillDyn b
 
@@ -206,7 +206,7 @@ fillDyn {loc} (PrintI64 {r_in, loc_in} _) = do
 
 fillDyn (LetRegion cont) = do
   c <- newCursorName
-  emit "int *\{c} = newRegion();"
+  emit "char *\{c} = newRegion();"
   let r   = MkRegion !newId
       loc = MkLE (LocStart r)
   addCur c (MkLocVal r loc)
@@ -218,7 +218,7 @@ fillDyn {loc, s} (CaseEither scrut cont_left cont_right) = do
   lift $ putStrLn " ++ CaseEither"
   addStaticSize loc $ 1 + sizeToInt s
   cur_tag <- genCursor loc
-  emit "if (*(int*) \{cur_tag} == 0) { // LEFT"
+  emit "if (*(char*) \{cur_tag} == 0) { // LEFT"
   indent $ fillDyn (cont_left (Var 0)) -- Q: FIX?
   emit "} else { // RIGHT"
   indent $ fillDyn (cont_right (Var 0)) -- Q: FIX?
@@ -241,7 +241,7 @@ allocRegion = do
   let r = MkRegion !newId
   let lv = MkLocVal r (MkLE (LocStart r))
   c <- newCursorName
-  emit "int *\{c} = newRegion();"
+  emit "char *\{c} = newRegion();"
   addCur c lv
   pure lv
 -}
@@ -252,7 +252,7 @@ toBufferDyn e = do
   s <- execStateT emptyCG $ do
             -- alloc main region
             c <- newCursorName
-            emit "int *\{c} = newRegion();"
+            emit "char *\{c} = newRegion();"
             --let r   = MkRegion (-1)
             --    loc = MkLE (LocStart (MkRegion (-1)))
             addCur c (MkLocVal (MkRegion (-1)) (MkLE (LocStart (MkRegion (-1)))))
@@ -265,5 +265,5 @@ toBufferDyn e = do
   TODO:
     - remove usage of Size in dynamic cursor backend,
       instead add Ty to LocAfter and generate runtime endwitness calculator code
-    - complete codegen to handle all Exp constructors
+    done - complete codegen to handle all Exp constructors
 -}
