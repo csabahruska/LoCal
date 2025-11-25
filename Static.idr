@@ -35,8 +35,8 @@ partial fill : {r : _} -> {loc : Loc r} -> Exp a loc s -> String
 fill {loc} (MkI64 i) = "write " ++ show i ++ " to " ++ show (locToIndex loc) ++ " ; "
 fill {loc} (MkTup2 a b) = fill a ++ fill b
 fill {loc} (MkInd {loc_in} _) = "write IND " ++ show (locToIndex loc_in) ++ " to " ++ show (locToIndex loc) ++ " ; "
-fill (PrjFst _ cont) = fill (cont (Var 0))
-fill (PrjSnd _ cont) = fill (cont (Var 0))
+fill (PrjFst _ cont) = fill (cont Var)
+fill (PrjSnd _ cont) = fill (cont Var)
 fill (PrintI64 {loc_in} _) = "read " ++ show (locToIndex loc_in) ++ " and PrintI64 ; "
 fill (LetRegion cont) = fill (cont (MkRegion 0)) -- TODO
 fill (Let {r_in} {loc_in} a cont) = fill {r=r_in} {loc=loc_in} a ++ fill (cont a)

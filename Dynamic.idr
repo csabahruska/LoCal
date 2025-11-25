@@ -12,6 +12,19 @@ partial sizeToInt : Size -> Int
 sizeToInt (STup2 a b) = sizeToInt a + sizeToInt b
 sizeToInt (STag a) = 1 + sizeToInt a
 sizeToInt (SInt a) = a
+{-
+  MkTup2
+  MkLeft
+  MkRight
+  CaseEither
+  Copy
+-}
+{-
+  TODO:
+    change C cursor representation to
+      typedef struct {char* begin; char* end;} cursor_t;
+-}
+
 
 {-
   TODO:
@@ -119,15 +132,17 @@ genCursor {r} loc = do
       case loc of
         MkLE (LocStart (MkRegion ri)) => assert_total $ idris_crash $ "INTERNAL ERROR: missing LocStart for region \{ri} locations: \{show locs}"
         MkLE (LocAfter _ _ l ) => do
+          {-
           let lv = MkLocVal r l
               Just size = lookup lv sizes
                 | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc size for \{show lv} locSize: \{show sizes}"
+          -}
           c <- newCur
-          emit "char *\{c} = (char*)\{!(genCursor l)} + \{size};"
+          emit "cursor_t \{c} = {.begin = \{!(genCursor l)}.end};"
           pure c
         MkLE (LocAfterTag l) => do
           c <- newCur
-          emit "char *\{c} = (char*)\{!(genCursor l)} + 1;"
+          emit "cursor_t \{c} = {.begin = \{!(genCursor l)}.end};"
           pure c
         MkLE (LocTup2Fst l) => do
           genCursor l
@@ -150,10 +165,11 @@ fillDyn {r} {loc} (MkI64 i) = do
       get cursor for the location
       store
   -}
-  addStaticSize loc 8       -- TODO: size or end witness?
+  --addStaticSize loc 8       -- TODO: size or end witness?
   cur <- genCursor loc
   --addStaticEndWitness loc 8 -- TODO: which do we want?
-  emit "*(int*) \{cur} = \{i};"
+  emit "*(int*) \{cur}.begin = \{i};"
+  emit "\{cur}.end = \{cur}.begin + 8;"
   pure ()
 {-
   char *cur0 = ...;
@@ -164,7 +180,7 @@ fillDyn {r} {loc} (MkI64 i) = do
 -}
 fillDyn {loc} (MkTup2 {a_s, b_s} a b) = do
   lift $ putStrLn " ++ MkTup2"
-  addStaticSize loc $ sizeToInt a_s + sizeToInt b_s
+  --addStaticSize loc $ sizeToInt a_s + sizeToInt b_s
   fillDyn a
   fillDyn b
   -- TODO: make it better!!
@@ -195,8 +211,8 @@ fillDyn {loc} (MkRight {s_b} b) = do
   addStaticSize loc $ 1 + sizeToInt s_b
   fillDyn b
 
-fillDyn (PrjFst _ cont) = fillDyn (cont (Var 0)) -- Q: is Var unused? why? is the location that track values instead of binder names?
-fillDyn (PrjSnd _ cont) = fillDyn (cont (Var 0)) -- Q: is Var unused? why? is the location that track values instead of binder names?
+fillDyn (PrjFst _ cont) = fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
+fillDyn (PrjSnd _ cont) = fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
 
 fillDyn {loc} (PrintI64 {r_in, loc_in} _) = do
   lift $ putStrLn " ++ PrintI64"
@@ -219,9 +235,9 @@ fillDyn {loc, s} (CaseEither scrut cont_left cont_right) = do
   addStaticSize loc $ 1 + sizeToInt s
   cur_tag <- genCursor loc
   emit "if (*(char*) \{cur_tag} == 0) { // LEFT"
-  indent $ fillDyn (cont_left (Var 0)) -- Q: FIX?
+  indent $ fillDyn (cont_left Var)
   emit "} else { // RIGHT"
-  indent $ fillDyn (cont_right (Var 0)) -- Q: FIX?
+  indent $ fillDyn (cont_right Var)
   emit "}"
 
 fillDyn {loc, s} (Copy {r_in, loc_in} src) = do
@@ -233,7 +249,7 @@ fillDyn {loc, s} (Copy {r_in, loc_in} src) = do
   cur_dst <- genCursor loc
   emit "memcpy(\{cur_dst}, \{cur_src}, \{bytes});"
 
-fillDyn (Var _) = assert_total $ idris_crash $ "Var"
+fillDyn Var = assert_total $ idris_crash $ "Var"
 
 {-
 allocRegion : M LocVal
@@ -266,4 +282,16 @@ toBufferDyn e = do
     - remove usage of Size in dynamic cursor backend,
       instead add Ty to LocAfter and generate runtime endwitness calculator code
     done - complete codegen to handle all Exp constructors
+-}
+{-
+  INSIGHTS:
+    - read: values can be bring to scope sequentially, but only when they are written
+        + requirement: written value
+        + position:
+          * depends on previus values (needs end witness computed at runtime, by traversing previous structures or using offset info)
+          * does not depend on previous values (static offset can be computed at compile time)
+    - write:
+        + unordered write: if the value is not read and if the position does not depend on previous values
+        + ordered write: value position depends on previous values
+    - write first / read second barrier: all reads must come after writes
 -}

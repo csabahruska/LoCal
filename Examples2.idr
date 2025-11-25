@@ -155,5 +155,6 @@ main = do
   putStr !(toBufferDyn sample_print_snd_fst)
   putStr !(toBufferDyn sample_new_tup_ind)
   putStr !(toBufferDyn sample_new_tup_copy)
-  -}
   putStr !(toBufferDyn sample_print_either_elim)
+  -}
+  putStr !(toBufferDyn sample_tup2_02)

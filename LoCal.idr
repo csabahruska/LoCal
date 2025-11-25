@@ -15,7 +15,7 @@ data Ty
     control flow construct data
       if          -> + types
       basic block -> * types
-    unconsrained recursion needs Box!!!
+    unconstrained recursion needs Box!!!
 -}
 
 {-
@@ -248,7 +248,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (size : Size) -> Type where
 -}
 
   -- internal
-  Var : Int -> Exp a loc s
+  Var : Exp a loc s
 
 public export
 data Fun : (arg : Ty) -> (res : Ty) -> Type where
