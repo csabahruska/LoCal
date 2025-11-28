@@ -39,15 +39,15 @@ Interpolation (Loc r t) where interpolate = show
 
 {-
   TODO:
-    - fully dynamic cursor passing and size calculation
+    done - fully dynamic cursor passing and size calculation
     - interpreter based static improvements
 -}
 
--- TODO: dynamic fill ; in a separate function
+-- DONE: dynamic fill ; in a separate function
 {-
   + the location expression tells how to serialize cursor passing
   TODO:
-    - use monad stack to store region/cursor environment
+    done - use monad stack to store region/cursor environment
 -}
 
 record CG where
@@ -113,20 +113,6 @@ addCur : String -> Loc r t -> M ()
 addCur c l = modify {locations $= insert (show l) c}
 
 -- IDEA: use Loc values in Map as keys via its show function
-
-{-
-data Loc : (r : Region) -> (t : Ty) -> Type where
-  LocStart    : (t : Ty) -> (r : Region) -> Loc r t
-  LocAfter    : (t : Ty) -> Loc r t_prev -> Loc r t   -- Q: dynamically/runtime known? maybe a better name is RuntimeAfter ; A: NO!
-                -- INSIGHT: if we would put Ty to this (instead of static size that would provide enough information to generate runtime function to calculate an endwitness
-                -- IDEA: location is not the right thing that descibes the next location
-                --        instead it would be the end witness of some value!
-                --        location + size-witness = end-witness
-          --    ^ this should be a value variable instead of Ty, that would solve the sizeof problem with either's left/right
-          --    Q: what problem would it cause?
-  LocAfterTag : (t : Ty) -> Loc r t_prev -> Loc r t         -- statically known ; used for jump over the tag
-  LocTup2Fst  : (t : Ty) -> Loc r t_prev -> Loc r t
--}
 
 getEndWitness : (loc : Loc r t) -> M String
 getEndWitness loc = do
@@ -231,7 +217,7 @@ fillDyn {loc} (MkInd {loc_in} _) = do
   lift $ putStrLn " ++ MkInd"
   cur <- genCursor loc
   addStaticSizeEndWitness loc 8 "Ind" -- 64 bit pointer
-  cur_in <- genCursor loc_in
+  cur_in <- getCursor loc_in
   -- TODO: support forward pointers
   -- Q: how to decide if a location is after or before of another?
   -- A: it is possible to compute that from loctions
@@ -242,7 +228,7 @@ fillDyn {loc} (MkIndLong {loc_in} _) = do
   lift $ putStrLn " ++ MkIndLong"
   cur <- genCursor loc
   addStaticSizeEndWitness loc 8 "IndLong" -- 64 bit pointer
-  cur_in <- genCursor loc_in
+  cur_in <- getCursor loc_in
   emit "*(char**) \{cur} = \{cur_in};"
 
 fillDyn {loc} (MkLeft a) = do
@@ -273,7 +259,7 @@ fillDyn {loc} (PrintI64 {loc_in} a) = do
   fillDyn a
   cur <- genCursor loc
   addStaticSizeEndWitness loc 0 "T0"
-  cur_in <- genCursor loc_in
+  cur_in <- getCursor loc_in
   emit "printf(\"%ld\\n\", *(int*) \{cur_in});"
 
 fillDyn {t} (LetRegion cont) = do
@@ -298,7 +284,7 @@ fillDyn {loc} (CaseEither {scrut_loc} scrut cont_left cont_right) = do
   fillDyn scrut
   cur <- genCursor loc
   cur_end <- declareEndWitness loc
-  cur_tag <- genCursor scrut_loc
+  cur_tag <- getCursor scrut_loc
   emit "if (*(char*) \{cur_tag} == 0) { // LEFT"
   indent $ localScope $ do
     let expL = cont_left Var
@@ -311,26 +297,14 @@ fillDyn {loc} (CaseEither {scrut_loc} scrut cont_left cont_right) = do
     setEndWitnessTo cur_end expR
   emit "}"
 
-fillDyn {loc} (Copy {r_in, loc_in} src) = do
+fillDyn {loc} (Copy {r_in, loc_in} _) = do
   lift $ putStrLn " ++ Copy"
-  fillDyn src
-  cur_src <- genCursor loc_in
+  cur_src <- getCursor loc_in
   cur_dst <- genCursor loc
   cur_src_end <- getEndWitness loc_in
   emit "memcpy(\{cur_dst}, \{cur_src}, \{cur_src_end} - \{cur_src});"
 
 fillDyn {t} Var = emit "// Var \{t}" -- assert_total $ idris_crash $ "Var"
-
-{-
-allocRegion : M LocVal
-allocRegion = do
-  let r = MkRegion !newId
-  let lv = MkLocVal r (MkLE (LocStart r))
-  c <- newCursorName
-  emit "char *\{c} = newRegion();"
-  addCur c lv
-  pure lv
--}
 
 partial public export
 toBufferDyn : {t : _} -> Exp t (LocStart t (MkRegion (-1))) -> IO String
@@ -342,13 +316,6 @@ toBufferDyn {t} e = do
   putStrLn " ---- CODE OUTPUT ----"
   pure $ unlines $ reverse s.code
 
-
-{-
-  TODO:
-    - remove usage of Size in dynamic cursor backend,
-      instead add Ty to LocAfter and generate runtime endwitness calculator code
-    done - complete codegen to handle all Exp constructors
--}
 {-
   INSIGHTS:
     - read: values can be bring to scope sequentially, but only when they are written

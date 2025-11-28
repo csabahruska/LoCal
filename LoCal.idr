@@ -51,8 +51,6 @@ data Loc : (r : Region) -> (t : Ty) -> Type where
           --    ^ this should be a value variable instead of Ty, that would solve the sizeof problem with either's left/right
           --    Q: what problem would it cause?
   LocAfterTag : String -> (t : Ty) -> Loc r t_prev -> Loc r t         -- statically known ; used for jump over the tag
-  --LocTup2Fst  : (t : Ty) -> Loc r t_prev -> Loc r t   -- TODO: merge with AfterTag ; currently this means after tup2 tag
---  LocInd      : (1 _ : Loc r) -> LocExp r
 
 data Fun : (arg : Ty) -> (res : Ty) -> Type
 
@@ -144,10 +142,7 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
       - instead of LocAfter Ty we should use size which should be included in the Exp
       - the Exp size could be used to define the region size also
   -}
-  {-
-sample_tup_either_01 : {loc : _} -> Exp (Tup2 (Either (Tup2 I64 I64) I64) I64) loc
-sample_tup_either_01 = MkTup2 (MkRight (MkI64 11)) (MkI64 222)
-  -}
+
   MkTup2 : {a, b : Ty} -> {loc : Loc r _} ->
     let locFst = LocAfterTag "Tup2" a loc in
     let locSnd = LocAfter b locFst in
