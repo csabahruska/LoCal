@@ -55,7 +55,6 @@ record CG where
   counter     : Int
   locations   : SortedMap String String
   endwitness  : SortedMap String String
-  locSize     : SortedMap String Int
   code        : List String
   indentLevel : Nat
 
@@ -64,7 +63,6 @@ emptyCG = MkCG
   { counter     = 0
   , locations   = empty
   , endwitness  = empty
-  , locSize     = empty
   , code        = []
   , indentLevel = 0
   }
@@ -91,6 +89,14 @@ indent m = do
   modify {indentLevel := l}
   pure res
 
+localScope : M a -> M a
+localScope m = do
+  locs <- gets (.locations)
+  endws <- gets (.endwitness)
+  res <- m
+  modify {locations := locs, endwitness := endws}
+  pure res
+
 emit : String -> M ()
 emit s = do
   cg <- get
@@ -99,6 +105,9 @@ emit s = do
 
 getTy : {t : _} -> {0 l : Loc r t} -> (Exp t l) -> Ty
 getTy {t} _ = t
+
+getLoc : {t : _} -> {l : Loc r t} -> (Exp t l) -> Loc r t
+getLoc {l} _ = l
 
 addCur : String -> Loc r t -> M ()
 addCur c l = modify {locations $= insert (show l) c}
@@ -119,6 +128,20 @@ data Loc : (r : Region) -> (t : Ty) -> Type where
   LocTup2Fst  : (t : Ty) -> Loc r t_prev -> Loc r t
 -}
 
+getEndWitness : (loc : Loc r t) -> M String
+getEndWitness loc = do
+  ends <- gets endwitness
+  let Just ew = lookup (show loc) ends
+        | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc endwitness for \{loc}\n endwitness map: \{show ends}"
+  pure ew
+
+getCursor : (loc : Loc r t) -> M String
+getCursor loc = do
+  locs <- gets locations
+  let Just cur = lookup (show loc) locs
+        | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc cursor for \{loc}\n locations map: \{show locs}"
+  pure cur
+
 -- TODO: check that it is written only once ; use an effect map for LocVals
 genCursor : (loc : Loc r t) -> M String
 genCursor loc = do
@@ -129,8 +152,6 @@ genCursor loc = do
     return exisiting when available
   -}
   locs <- gets locations
-  --sizes <- gets locSize
-  ends <- gets endwitness
   let newCur = do
         c <- newCursorName
         lift $ print $ colored BrightRed " !! add cursor \{c} :=\n \{loc}\n\n"
@@ -144,69 +165,57 @@ genCursor loc = do
       case loc of
         LocStart _ (MkRegion ri) => assert_total $ idris_crash $ "INTERNAL ERROR: missing LocStart for region \{ri} locations: \{show locs}"
         LocAfter _ l => do
-          let Just ew = lookup (show l) ends
-                | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc endwitness for \{l} endwitness map: \{show ends}"
           c <- newCur
-          emit "char* \{c} = \{ew};"
+          emit "char* \{c} = \{!(getEndWitness l)};"
           pure c
-        LocAfterTag _ _ l => do
-          let Just ew = lookup (show l) ends
-                | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc endwitness for \{l} endwitness map: \{show ends}"
+        LocAfterTag s _ l => do
+          let tagSize = case s of
+                "Tup2" => 0
+                _      => 1
           c <- newCur
-          emit "char* \{c} = \{ew};"
+          emit "char* \{c} = \{!(getCursor l)} + \{tagSize};"
           pure c
-{-
-getLocTy
-getLocOffset : Loc r t -> Int
-getLocOffset (LocStart _ _) = 0
-getLocOffset (LocAfterTag _ l) = getLocOffset l
--}
-{-
-  LocAfter (I64)
- (LocAfterTag (I64)
- (LocAfter (Tup2 (I64) (I64))
- (LocAfterTag (Tup2 (I64) (I64))
- (LocStart (Tup2 (Tup2 (I64) (I64)) (Tup2 (I64) (I64))) MkRegion -1))))
 
--}
+declareEndWitness : (loc : Loc r t) -> M String
+declareEndWitness loc = do
+  cur <- getCursor loc
+  let ew = "\{cur}_end"
+  modify {endwitness $= insert (show loc) ew}
+  emit "char* \{ew} = 0; // uninitialized"
+  pure ew
+
+setEndWitnessTo : {loc2 : _} -> String -> Exp _ loc2 -> M ()
+setEndWitnessTo {loc2} ew _ = do
+  ew2 <- getEndWitness loc2
+  emit "\{ew} = \{ew2};"
 
 updateEndWitnessTo : {loc2 : _} -> (loc : Loc r t) -> Exp _ loc2 -> M ()
 updateEndWitnessTo {loc2} loc e = do
-  ends <- gets endwitness
-  let Just ew = lookup (show loc2) ends
-        | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc endwitness for \{loc2} endwitness map: \{show ends}"
+  ew <- getEndWitness loc2
   modify {endwitness $= insert (show loc) ew}
+  lift $ print $ colored BrightBlue " update endwitness to \{ew} for\n \{loc}\n\n"
 
 addStaticSizeEndWitness : (loc : Loc r t) -> Int -> String -> M ()
 addStaticSizeEndWitness l bytes msg = do
-  locs <- gets locations
-  let Just cur = lookup (show l) locs
-        | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing cursor for \{l}, locations map: \{show locs}"
+  cur <- getCursor l
   let ew = "\{cur}_end"
   modify {endwitness $= insert (show l) ew}
   emit "char* \{ew} = \{cur} + \{bytes}; // \{msg}"
+  lift $ print $ colored BrightCyan " add endwitness to \{ew} for\n \{l}\n\n"
 
 partial fillDyn : {r : _ } -> {t : _ } -> {loc : Loc r t} -> Exp t loc -> M ()
 fillDyn {r} {loc} (MkI64 i) = do
   lift $ putStrLn " ++ MkI64 \{i}"
-  {-
-    TODO:
-      - gen location and store it on cg env
-      get cursor for the location
-      store
-  -}
   cur <- genCursor loc
-  addStaticSizeEndWitness loc 8 "I64" -- TODO: which do we want?
+  addStaticSizeEndWitness loc 8 "I64"
   emit "*(int*) \{cur} = \{i};"
 
 fillDyn {loc} (MkTup2 a b) = do
   lift $ putStrLn " ++ MkTup2"
   cur <- genCursor loc
-  addStaticSizeEndWitness loc 0 "Tup2Tag" -- TODO: which do we want?
   fillDyn a
   fillDyn b
   updateEndWitnessTo loc b
-  -- TODO: make it better!!
 
 {-
   NOTES:
@@ -223,6 +232,10 @@ fillDyn {loc} (MkInd {loc_in} _) = do
   cur <- genCursor loc
   addStaticSizeEndWitness loc 8 "Ind" -- 64 bit pointer
   cur_in <- genCursor loc_in
+  -- TODO: support forward pointers
+  -- Q: how to decide if a location is after or before of another?
+  -- A: it is possible to compute that from loctions
+  --  TODO: write such a function
   emit "*(char**) \{cur} = \{cur_in};"
 
 fillDyn {loc} (MkIndLong {loc_in} _) = do
@@ -235,31 +248,31 @@ fillDyn {loc} (MkIndLong {loc_in} _) = do
 fillDyn {loc} (MkLeft a) = do
   lift $ putStrLn " ++ MkLeft"
   cur <- genCursor loc
-  addStaticSizeEndWitness loc 1 "LeftTag" -- 64 bit pointer
   emit "*(char*) \{cur} = 0; // LEFT_TAG"
   fillDyn a
-  updateEndWitnessTo loc a -- TODO: write cursor
+  updateEndWitnessTo loc a
 
 fillDyn {loc} (MkRight b) = do
   lift $ putStrLn " ++ MkRight"
   cur <- genCursor loc
-  addStaticSizeEndWitness loc 1 "RightTag" -- 64 bit pointer
   emit "*(char*) \{cur} = 1; // RIGHT_TAG"
   fillDyn b
   updateEndWitnessTo loc b
 
 fillDyn (PrjFst {r} a cont) = do
-  fillDyn a
   lift $ putStrLn " ++ PrjFst"
+  fillDyn a
   fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
 fillDyn (PrjSnd a cont) = do
-  fillDyn a
   lift $ putStrLn " ++ PrjSnd"
+  fillDyn a
   fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
 
 fillDyn {loc} (PrintI64 {loc_in} a) = do
   lift $ putStrLn " ++ PrintI64"
   fillDyn a
+  cur <- genCursor loc
+  addStaticSizeEndWitness loc 0 "T0"
   cur_in <- genCursor loc_in
   emit "printf(\"%ld\\n\", *(int*) \{cur_in});"
 
@@ -280,24 +293,33 @@ fillDyn (LetRegionValue {a,t} r v cont) = do
 {-
 fillDyn (Let {r_in} {loc_in} a cont) = fillDyn {r=r_in} {loc=loc_in} a >> fillDyn (cont a)
 -}
-fillDyn (CaseEither {loc} scrut cont_left cont_right) = do
+fillDyn {loc} (CaseEither {scrut_loc} scrut cont_left cont_right) = do
   lift $ putStrLn " ++ CaseEither"
   fillDyn scrut
-  cur_tag <- genCursor loc
+  cur <- genCursor loc
+  cur_end <- declareEndWitness loc
+  cur_tag <- genCursor scrut_loc
   emit "if (*(char*) \{cur_tag} == 0) { // LEFT"
-  indent $ fillDyn (cont_left Var)
+  indent $ localScope $ do
+    let expL = cont_left Var
+    fillDyn expL
+    setEndWitnessTo cur_end expL
   emit "} else { // RIGHT"
-  indent $ fillDyn (cont_right Var)
+  indent $ localScope $ do
+    let expR = cont_right Var
+    fillDyn expR
+    setEndWitnessTo cur_end expR
   emit "}"
 
 fillDyn {loc} (Copy {r_in, loc_in} src) = do
   lift $ putStrLn " ++ Copy"
-  let bytes = 0 --sizeToInt s
+  fillDyn src
   cur_src <- genCursor loc_in
   cur_dst <- genCursor loc
-  emit "memcpy(\{cur_dst}, \{cur_src}, \{bytes});"
+  cur_src_end <- getEndWitness loc_in
+  emit "memcpy(\{cur_dst}, \{cur_src}, \{cur_src_end} - \{cur_src});"
 
-fillDyn Var = emit "// Var" -- assert_total $ idris_crash $ "Var"
+fillDyn {t} Var = emit "// Var \{t}" -- assert_total $ idris_crash $ "Var"
 
 {-
 allocRegion : M LocVal
@@ -312,18 +334,10 @@ allocRegion = do
 
 partial public export
 toBufferDyn : {t : _} -> Exp t (LocStart t (MkRegion (-1))) -> IO String
---public export partial toBufferDyn : Exp a (LocStart a (MkRegion (-1))) -> IO String
 toBufferDyn {t} e = do
   print $ background Yellow " ---- CODEGEN ----"
   putStrLn ""
   s <- execStateT emptyCG $ do
-    c <- newCursorName
-    -- alloc main region
-    emit "char *\{c} = newRegion();"
-    let r   = MkRegion (-1)
-    let loc = LocStart t r
-    addCur c (LocStart t (MkRegion (-1)))
-    --fillDyn {r=MkRegion (-1)} {loc=MkLE (LocStart (MkRegion (-1)))} e
     fillDyn $ LetRegionValue (MkRegion (-1)) e id
   putStrLn " ---- CODE OUTPUT ----"
   pure $ unlines $ reverse s.code

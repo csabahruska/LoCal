@@ -183,9 +183,9 @@ sample_tup_either_01 = MkTup2 (MkRight (MkI64 11)) (MkI64 222)
       + can genetrate end-witness producing runtime function at compile time    ; runtime      = end-witness function : value -> end-witness
 -}
 
-  CaseEither : {r : _} -> {a, b, c : Ty} -> {loc : Loc r _} -> {loc_out : Loc r_out _} -> Exp (Either a b) loc ->
-               let locL = LocAfterTag "Left" a loc in
-               let locR = LocAfterTag "Right" b loc in
+  CaseEither : {r : _} -> {a, b, c : Ty} -> {scrut_loc : Loc r _} -> {loc_out : Loc r_out _} -> Exp (Either a b) scrut_loc ->
+               let locL = LocAfterTag "Left" a scrut_loc in
+               let locR = LocAfterTag "Right" b scrut_loc in
                (Exp a locL -> Exp c loc_out) -> (Exp b locR -> Exp c loc_out) -> Exp c loc_out
                -- PROBLEM/TODO: what if the output size differs?
                -- IDEAS: is the result size an Either Int Int?
@@ -194,7 +194,7 @@ sample_tup_either_01 = MkTup2 (MkRight (MkI64 11)) (MkI64 222)
 -}
 
   -- internal
-  Var : {-{a : _} -> {r : _} -> {loc : Loc r a} -> -}Exp a loc
+  Var : {-{a : _} -> {r : _} -> {loc : Loc r a} ->-} Exp a loc
 
 public export
 data Fun : (arg : Ty) -> (res : Ty) -> Type where

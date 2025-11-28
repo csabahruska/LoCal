@@ -118,6 +118,36 @@ sample_print_either_elim3 =
     (\l => MkIndLong e1)
     (\r => MkIndLong e1)
 
+sample_print_either_elim4 : {loc_out : _} -> Exp (Tup2 (Either (Tup2 I64 I64) I64) I64) loc_out
+sample_print_either_elim4 =
+  LetRegion $ \r =>
+  LetRegionValue r sample_left_01 $ \e1 =>
+  let v1 = CaseEither e1
+        (\l => MkLeft (MkTup2 (MkI64 11) (MkI64 22)))
+        (\r => MkRight (MkI64 33))
+  in MkTup2 v1 (MkI64 44)
+
+-- TODO: support forward pointers
+sample_print_either_elim5_forward_ind : {loc_out : _} -> Exp (Tup2 (Ind I64) (Tup2 (Either (Tup2 I64 I64) I64) I64)) loc_out
+sample_print_either_elim5_forward_ind =
+  LetRegion $ \r =>
+  LetRegionValue r sample_left_01 $ \e1 =>
+  let v1 = CaseEither e1
+        (\l => MkLeft (MkTup2 (MkI64 11) (MkI64 22)))
+        (\r => MkRight (MkI64 33)) in
+  let i1 = MkI64 44 in
+  MkTup2 (MkInd i1) (MkTup2 v1 i1)
+
+sample_print_either_elim5_backward_ind : {loc_out : _} -> Exp (Tup2 (Tup2 I64 (Either (Tup2 I64 I64) I64)) (Ind I64)) loc_out
+sample_print_either_elim5_backward_ind =
+  LetRegion $ \r =>
+  LetRegionValue r sample_left_01 $ \e1 =>
+  let v1 = CaseEither e1
+        (\l => MkLeft (MkTup2 (MkI64 11) (MkI64 22)))
+        (\r => MkRight (MkI64 33)) in
+  let i1 = MkI64 44 in
+  MkTup2 (MkTup2 i1 v1) (MkInd i1)
+
 -- test
 
 partial main : IO ()
@@ -144,4 +174,8 @@ main = do
   --putStr !(toBufferDyn sample_left_01)
   --putStr !(toBufferDyn sample_tup_either_01)
   --putStr !(toBufferDyn sample_print_snd_fst)
-  putStr !(toBufferDyn sample_print_either_elim)
+  --putStr !(toBufferDyn sample_print_either_elim)
+  --putStr !(toBufferDyn sample_print_either_elim4)
+  --putStr !(toBufferDyn sample_print_either_elim2)
+  --putStr !(toBufferDyn sample_print_either_elim5_forward_ind)
+  putStr !(toBufferDyn sample_print_either_elim5_backward_ind)
