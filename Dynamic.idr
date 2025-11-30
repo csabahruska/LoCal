@@ -329,4 +329,21 @@ toBufferDyn {t} e = do
     - write first / read second barrier: all reads must come after writes
   TODO:
     - learn about read and write cursors
+    - write funtion to compute the static offset of a location in this form: static offset + list of location runtime sizes
+    - write location ord comparison function, to check before after relation
+    - write isNextLoc function
+    - support forward pointers
+    - separate offsets and pointers
+    - add functions
+    - write full value traversal checker function, which would tell the unaccessed locations
+    - add high level language and map it to local
+    - support dec/def types
+
+  Q: would it be enough in practice if only backward pointers would be supported?
+  Q: how is atomicity and value sharing is related? (value representation and value indirection)
+      can an indirection be created where the actual value is not created yet?
+      the indirection must not be read before it is written, but this is true for every value
+      TODO:
+        - add effect tracking to locations: ALLOC, WRITE, READ
+        - check the required effects during codegen
 -}

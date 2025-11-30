@@ -177,5 +177,5 @@ main = do
   --putStr !(toBufferDyn sample_print_either_elim)
   --putStr !(toBufferDyn sample_print_either_elim4)
   --putStr !(toBufferDyn sample_print_either_elim2)
-  putStr !(toBufferDyn sample_print_either_elim5_forward_ind)
-  --putStr !(toBufferDyn sample_print_either_elim5_backward_ind)
+  --putStr !(toBufferDyn sample_print_either_elim5_forward_ind) -- TODO
+  putStr !(toBufferDyn sample_print_either_elim5_backward_ind)
