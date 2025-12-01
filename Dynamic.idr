@@ -50,6 +50,36 @@ Interpolation (Loc r t) where interpolate = show
     done - use monad stack to store region/cursor environment
 -}
 
+-- static index calculator
+
+getStaticSize : Ty -> Maybe Int
+getStaticSize = \case
+  T0    => Just 0
+  I64   => pure 8
+  Ind _ => pure 8
+  Tup2 a b => do
+    sa <- getStaticSize a
+    sb <- getStaticSize b
+    pure (sa + sb)
+  Either a b => do
+    sa <- getStaticSize a
+    sb <- getStaticSize b
+    if sa == sb -- special case, when the left and right size matches and statically known
+      then Just (1 + sa)
+      else Nothing
+  DecTy _ => Nothing
+  DefTy _ _ a => getStaticSize a
+
+-- TODO: return: relative base value and static offset, and the required runtime end witnesses
+getStaticIndex : Loc r t -> Maybe Int
+getStaticIndex = \case
+  LocStart t _ => getStaticSize t
+  -- TODO: fix this, because it is not correct, handle after tag properly tup2 and either l/r
+  LocAfter t l => (+) <$> getStaticSize t <*> getStaticIndex l
+  LocAfterTag _ t l => (+) <$> getStaticSize t <*> getStaticIndex l
+
+-- codegen monad
+
 record CG where
   constructor MkCG
   counter     : Int
@@ -329,21 +359,21 @@ toBufferDyn {t} e = do
     - write first / read second barrier: all reads must come after writes
   TODO:
     - learn about read and write cursors
-    - write funtion to compute the static offset of a location in this form: static offset + list of location runtime sizes
+    - write function to compute the static offset of a location in this form: static offset + list of location runtime sizes
     - write location ord comparison function, to check before after relation
     - write isNextLoc function
+    - add effect tracking to locations: ALLOC, WRITE, READ
+    - check the required effects during codegen
     - support forward pointers
     - separate offsets and pointers
     - add functions
     - write full value traversal checker function, which would tell the unaccessed locations
     - add high level language and map it to local
+      + for first use fully pointer based approach
     - support dec/def types
 
   Q: would it be enough in practice if only backward pointers would be supported?
   Q: how is atomicity and value sharing is related? (value representation and value indirection)
       can an indirection be created where the actual value is not created yet?
       the indirection must not be read before it is written, but this is true for every value
-      TODO:
-        - add effect tracking to locations: ALLOC, WRITE, READ
-        - check the required effects during codegen
 -}
