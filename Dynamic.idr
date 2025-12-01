@@ -69,14 +69,40 @@ getStaticSize = \case
       else Nothing
   DecTy _ => Nothing
   DefTy _ _ a => getStaticSize a
+{-
+data LocItem : Type where
+  MkLocItem : Loc r t -> LocItem
+
+RevLoc = List LocItem
+--RevLoc2 = List (r : Region ** (t : Ty ** Loc r t))
+
+mkRevLoc : Loc r t -> RevLoc
+mkRevLoc loc = case loc of
+  LocStart _ _ => [MkLocItem loc]
+  LocAfter _ l => mkRevLoc l ++ [MkLocItem loc]
+  LocAfterTag _ _ l => mkRevLoc l ++ [MkLocItem loc]
+-}
+getLocTy : Loc r t -> Ty
+getLocTy (LocStart t _) = t
+getLocTy (LocAfter t _) = t
+getLocTy (LocAfterTag _ t _) = t
+
+getLocRegion : {r : _} -> Loc r t -> Region
+getLocRegion {r} _ = r
 
 -- TODO: return: relative base value and static offset, and the required runtime end witnesses
 getStaticIndex : Loc r t -> Maybe Int
 getStaticIndex = \case
-  LocStart t _ => getStaticSize t
-  -- TODO: fix this, because it is not correct, handle after tag properly tup2 and either l/r
-  LocAfter t l => (+) <$> getStaticSize t <*> getStaticIndex l
-  LocAfterTag _ t l => (+) <$> getStaticSize t <*> getStaticIndex l
+  LocStart _ _ => Just 0
+  LocAfter _ l => do
+    i <- getStaticIndex l
+    s <- getStaticSize (getLocTy l)
+    Just (i + s)
+  LocAfterTag "Tup2" _ l => do
+    getStaticIndex l
+  LocAfterTag _ _ l => do
+    i <- getStaticIndex l
+    Just (1 + i)
 
 -- codegen monad
 
@@ -159,8 +185,8 @@ getCursor loc = do
   pure cur
 
 -- TODO: check that it is written only once ; use an effect map for LocVals
-genCursor : (loc : Loc r t) -> M String
-genCursor loc = do
+genCursor : {r :_ } -> (loc : Loc r t) -> M String
+genCursor {r} loc = do
   --lift $ putStrLn " !! gen cursor for \{loc}"
   let locKey = show loc
   {-
@@ -171,6 +197,7 @@ genCursor loc = do
   let newCur = do
         c <- newCursorName
         lift $ print $ colored BrightRed " !! add cursor \{c} :=\n \{loc}\n\n"
+        lift $ print $ colored BrightMagenta " !! static index \{c} := \{show (getStaticIndex loc)}\n\n"
         addCur c loc
         pure c
   case lookup locKey !(gets locations) of
@@ -182,14 +209,14 @@ genCursor loc = do
         LocStart _ (MkRegion ri) => assert_total $ idris_crash $ "INTERNAL ERROR: missing LocStart for region \{ri} locations: \{show locs}"
         LocAfter _ l => do
           c <- newCur
-          emit "char* \{c} = \{!(getEndWitness l)};"
+          emit "char* \{c} = \{!(getEndWitness l)}; // STATIC INDEX \{show (getStaticIndex loc)} in \{show (getLocRegion loc)}"
           pure c
         LocAfterTag s _ l => do
           let tagSize = case s of
                 "Tup2" => 0
                 _      => 1
           c <- newCur
-          emit "char* \{c} = \{!(getCursor l)} + \{tagSize};"
+          emit "char* \{c} = \{!(getCursor l)} + \{tagSize}; // STATIC INDEX \{show (getStaticIndex loc)} in \{show (getLocRegion loc)}"
           pure c
 
 declareEndWitness : (loc : Loc r t) -> M String
@@ -369,7 +396,7 @@ toBufferDyn {t} e = do
     - add functions
     - write full value traversal checker function, which would tell the unaccessed locations
     - add high level language and map it to local
-      + for first use fully pointer based approach
+      + for first use fully pointer based approach with a bump allocator region allocator
     - support dec/def types
 
   Q: would it be enough in practice if only backward pointers would be supported?
