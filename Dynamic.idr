@@ -403,4 +403,44 @@ toBufferDyn {t} e = do
   Q: how is atomicity and value sharing is related? (value representation and value indirection)
       can an indirection be created where the actual value is not created yet?
       the indirection must not be read before it is written, but this is true for every value
+
+  IDEA:
+    transform the code into sequential composition of dynamic and static sized allocated and filled blocks
+    the indices would be statically known within each static block where the base pointer would be the input of the static block
+    and the base pointer would be produced at runtime and it would represent the end witness for a dynamically sized value
+    Q: is this cursor calculus?
+    - think about compressed regions, static sized region chunks could fetch or push data to/from compression
+
+  INSIGHTS:
+    - LoCal nuresry has the same role as the ALLOC/READ/WRITE effect system
+    - offset and indirection is an endwitness problem which is a cursor language related issue, more specifically it is related to the dynamic sized block
+      LoCal does not have the concept of endwitness
+      for efficiency the endwitness must be computed in constant time O(1) via offset or pointer or size
+    - imlicit sharing support = LoCal + interpreter
+      parallelism support     = LoCal + interpreter
+      where the interpreter handles the indirection resolution
+  Q: is endwitness type (static, indirection, or traversal-where the program consumes it-) a property of each location?
+  A: i think so
+    - cursor calculus can include endwitnesses for dynamically sized values,
+      this should be reflected in the cursor calculus type system,
+      function applications must be well typed in cursor calculus
+  - the L location's endwitness is an indirection to the value comes after L
+    INSIGHT:
+      this is a misconception because end witness is a cursor calculus level concept, although technically it is a pointer also
+      the lowest level of calculus must be the cursor calculus that will set the location and endwitness semantics along with the final layout
+
+  TODO:
+    - implement traversal effect calculation
+    - insert explicit endwitness computation method to locations which will set the semantics and layout
+
+  Q: could the endwitness strategy be included as an Exp or location index?
+     with this LoCal would describe the exact layout and cursor calculus would not be needed
+  Q: should require full traverse effect in LoCal? could it be modeled with endwitness strategy encoding?
+
+  IDEA:
+    enforce full structure traversal by construction, with Tup2 eliminator in LoCal
+
+  Q: which design is better?
+    a) linear cursor passing
+    b) sequence of statically indexed blocks with dynamic base index
 -}
