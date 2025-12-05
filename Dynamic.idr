@@ -430,7 +430,7 @@ toBufferDyn {t} e = do
     - support forward pointers
     - separate offsets and pointers
     - add functions
-    - write full value traversal checker function, which would tell the unaccessed locations
+    SKIP - write full value traversal checker function, which would tell the unaccessed locations ; not possible in LoCal RTup2/STup2 is to make this explicit
     - add high level language and map it to local
       + for first use fully pointer based approach with a bump allocator region allocator
     - support dec/def types
@@ -448,7 +448,7 @@ toBufferDyn {t} e = do
     - think about compressed regions, static sized region chunks could fetch or push data to/from compression
 
   INSIGHTS:
-    - LoCal nuresry has the same role as the ALLOC/READ/WRITE effect system
+    - LoCal type system nuresry has the same role as the ALLOC/READ/WRITE effect system
     - offset and indirection is an endwitness problem which is a cursor language related issue, more specifically it is related to the dynamic sized block
       LoCal does not have the concept of endwitness
       for efficiency the endwitness must be computed in constant time O(1) via offset or pointer or size
@@ -465,13 +465,16 @@ toBufferDyn {t} e = do
       this is a misconception because end witness is a cursor calculus level concept, although technically it is a pointer also
       the lowest level of calculus must be the cursor calculus that will set the location and endwitness semantics along with the final layout
 
-  TODO:
+  TODO: for high level Exp
     - implement traversal effect calculation
     - insert explicit endwitness computation method to locations which will set the semantics and layout
 
   Q: could the endwitness strategy be included as an Exp or location index?
      with this LoCal would describe the exact layout and cursor calculus would not be needed
+  A: YES with RTup2 and STup2 the endwittness computation becomes explicit in LoCal
+
   Q: should require full traverse effect in LoCal? could it be modeled with endwitness strategy encoding?
+  A: YES RTup2/STup2 solves this also.
 
   IDEA:
     enforce full structure traversal by construction, with Tup2 eliminator in LoCal
@@ -484,4 +487,12 @@ toBufferDyn {t} e = do
     done - add two kind of tules: SerialTup2 (STup2) and RandomAccessTup2 (RTup2)
   TODO:
     done - allocate RTup2 snd indirection only when fst size is not statically known
+    - finish LoCal:
+      + effect tracking during codegen
+      + add function support
+    - add high level Exp
+      + adt support
+      + no locations
+      + implicit sharing support
+      + translate to LoCal
 -}

@@ -10,4 +10,4 @@ v i = K2 i
 
 s : Int -> String
 s i = case v i of
-  K2 a {c=t} => show $ fst t
+  K2 a {c} => show c.fst
