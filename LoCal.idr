@@ -3,7 +3,8 @@ module LoCal
 public export
 data Ty
   = T0
-  | Tup2 Ty Ty
+  | STup2 Ty Ty   -- serial access only, fst then snd
+  | RTup2 Ty Ty   -- random access, O(1) access of snd
   | Either Ty Ty
   | I64
   | Ind Ty -- raw pointer ; no tag ; just the location data
@@ -25,7 +26,7 @@ FromString Ty where fromString = DecTy
 
 {-
   REPRESENTATION:
-    - no tag:   I64, Tup2
+    - no tag:   I64, STup2, RTup2
     - has tag:  Either
 
   FUTURE WORK:
@@ -127,7 +128,10 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
 
   -- indirection
   MkInd : {loc_in : Loc r t} -> {loc_ind : Loc r (Ind t)} -> Exp t loc_in -> Exp (Ind t) loc_ind -- within the same region
+  DeRef : {loc_in : Loc r t} -> {loc_ind : Loc r (Ind t)} -> Exp (Ind t) loc_ind -> Exp t loc_in -- within the same region
+
   MkIndLong : {r_in : _} -> {loc_in : Loc r_in t} -> Exp t loc_in -> Exp (Ind t) loc_ind      -- cross region
+  DeRefLong : {r_in : _} -> {loc_in : Loc r_in t} -> Exp (Ind t) loc_ind -> Exp t loc_in      -- cross region
 
   -- to copy values cross region
   Copy : {r_in : _} -> {loc_in : Loc r_in t} -> Exp t loc_in -> Exp t loc
@@ -143,10 +147,15 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
       - the Exp size could be used to define the region size also
   -}
 
-  MkTup2 : {a, b : Ty} -> {loc : Loc r _} ->
-    let locFst = LocAfterTag "Tup2" a loc in
+  MkSTup2 : {a, b : Ty} -> {loc : Loc r _} ->
+    let locFst = LocAfterTag "STup2" a loc in
     let locSnd = LocAfter b locFst in
-    Exp a locFst -> Exp b locSnd -> Exp (Tup2 a b) loc
+    Exp a locFst -> Exp b locSnd -> Exp (STup2 a b) loc
+
+  MkRTup2 : {a, b : Ty} -> {loc : Loc r _} ->
+    let locFst = LocAfterTag "RTup2" a loc in
+    let locSnd = LocAfter b locFst in
+    Exp a locFst -> Exp b locSnd -> Exp (RTup2 a b) loc
 
   MkLeft  : {a, b : Ty} -> {loc : Loc r _} ->
     let locArg = LocAfterTag "Left" a loc in
@@ -161,15 +170,28 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
     every data access needs to be tested to Ind and do the dereference for it
     INSIGHT: sharing poisons code, because requires interpretation
 -}
-  PrjFst : {r : _} -> {a, b, c : Ty} -> {loc : Loc r _} -> {loc_out : Loc r_out _} -> Exp (Tup2 a b) loc ->
-            let locFst = LocAfterTag "Tup2" a loc in
+  -- random access tup2
+  PrjFst : {r : _} -> {a, b, c : Ty} -> {loc : Loc r _} -> {loc_out : Loc r_out _} -> Exp (RTup2 a b) loc ->
+            let locFst = LocAfterTag "RTup2" a loc in
             (Exp a locFst -> Exp c loc_out) -> Exp c loc_out
 
-  PrjSnd : {r : _} -> {a, b, c : Ty} -> {loc : Loc r _} -> {loc_out : Loc r_out _} -> Exp (Tup2 a b) loc ->
-            let locFst = LocAfterTag "Tup2" a loc in
+  PrjSnd : {r : _} -> {a, b, c : Ty} -> {loc : Loc r _} -> {loc_out : Loc r_out _} -> Exp (RTup2 a b) loc ->
+            let locFst = LocAfterTag "RTup2" a loc in
             let locSnd = LocAfter b locFst in
             (Exp b locSnd -> Exp c loc_out) -> Exp c loc_out
 
+  -- serial access tup2
+  -- TODO: this is not the right model ; traverse effect checking is needed anyways
+  {-
+  CaseSTup2 : {r : _} -> {a, b, c, d : Ty} -> {loc : Loc r _} -> {loc_out1 : Loc r_out1 _} -> {loc_out2 : Loc r_out2 _} -> Exp (STup2 a b) loc ->
+              let locFst = LocAfterTag "STup2" a loc in
+              let locSnd = LocAfter b locFst in
+              (Exp a locFst -> Exp c loc_out1) -> (Exp b locSnd -> Exp c loc_out1 -> Exp d loc_out2) -> Exp d loc_out2
+  -}
+  CaseSTup2 : {r : _} -> {a, b, c : Ty} -> {loc : Loc r _} -> {loc_out : Loc r_out _} -> Exp (STup2 a b) loc ->
+              let locFst = LocAfterTag "STup2" a loc in
+              let locSnd = LocAfter b locFst in
+              (Exp a locFst -> Exp b locSnd -> Exp c loc_out) -> Exp c loc_out
 {-
   IDEA:
     - model custsors and end witnesses
@@ -353,4 +375,16 @@ fn = \a => \b => b
       - create a gibbon example for this, check the C code ; see: WritePackedFile
         gibbon allocates garbage into a separate region, and it puts the output into the same region
       - how will my interpreter handle this?
+  TODO:
+    - add Ind eliminator: DeRef
+    Q: when a pointer is a forward reference then is it possile that it will be dereferred before it is written?
+    A: yes, which is wrong.
+      Q: how to avoid this situation? is it possible to track effects in types?
+
+
+  TODO:
+    done - add STup2 and RTup2 and their eliminators ; this solves the traversal problem by making it expicit and correct by construction
+    - add example for STup2
+    - add static or dynamic assertion to MkInd to check that the referred value is written ; this guarantees the correctness of DeRef
+      every function argument must be fully written, every return value must be fully written
 -}

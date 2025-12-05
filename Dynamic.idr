@@ -2,6 +2,7 @@ module Dynamic
 
 import LoCal
 --import Instances
+import Data.Maybe
 import Data.SortedMap
 import Data.String
 import Control.Monad.State
@@ -18,7 +19,8 @@ Interpolation Region where interpolate = show
 showTy : Ty -> String
 showTy t = case t of
   T0          => "T0"
-  Tup2 a b    => "Tup2 (\{showTy a}) (\{showTy b})"
+  STup2 a b   => "STup2 (\{showTy a}) (\{showTy b})"
+  RTup2 a b   => "RTup2 (\{showTy a}) (\{showTy b})"
   Either a b  => "Either (\{showTy a}) (\{showTy b})"
   I64         => "I64"
   Ind a       => "Ind (\{showTy a})"
@@ -57,10 +59,14 @@ getStaticSize = \case
   T0    => Just 0
   I64   => pure 8
   Ind _ => pure 8
-  Tup2 a b => do
+  STup2 a b => do
     sa <- getStaticSize a
     sb <- getStaticSize b
     pure (sa + sb)
+  RTup2 a b => do
+    sa <- getStaticSize a
+    sb <- getStaticSize b
+    pure (sa + sb) -- HINT: no indirection is needed when fst static size is known
   Either a b => do
     sa <- getStaticSize a
     sb <- getStaticSize b
@@ -90,6 +96,12 @@ getLocTy (LocAfterTag _ t _) = t
 getLocRegion : {r : _} -> Loc r t -> Region
 getLocRegion {r} _ = r
 
+isStaticSize : Ty -> Bool
+isStaticSize t = isJust $ getStaticSize t
+
+getRTupTagSize : Ty -> Int
+getRTupTagSize fstTy = if isStaticSize fstTy then 0 else 8 -- no indirection to snd is needed when the static size of fst is known
+
 -- TODO: return: relative base value and static offset, and the required runtime end witnesses
 getStaticIndex : Loc r t -> Maybe Int
 getStaticIndex = \case
@@ -98,8 +110,11 @@ getStaticIndex = \case
     i <- getStaticIndex l
     s <- getStaticSize (getLocTy l)
     Just (i + s)
-  LocAfterTag "Tup2" _ l => do
+  LocAfterTag "STup2" _ l => do
     getStaticIndex l
+  LocAfterTag "RTup2" fstTy l => do
+    i <- getStaticIndex l
+    Just (getRTupTagSize fstTy + i)
   LocAfterTag _ _ l => do
     i <- getStaticIndex l
     Just (1 + i)
@@ -211,13 +226,21 @@ genCursor {r} loc = do
           c <- newCur
           emit "char* \{c} = \{!(getEndWitness l)}; // STATIC INDEX \{show (getStaticIndex loc)} in \{show (getLocRegion loc)}"
           pure c
-        LocAfterTag s _ l => do
-          let tagSize = case s of
-                "Tup2" => 0
-                _      => 1
+        LocAfterTag s fstTy l => do
+          let tagSize : Int = case s of
+                "STup2" => 0
+                "RTup2" => getRTupTagSize fstTy -- maybe an indirection for snd
+                _       => 1
           c <- newCur
           emit "char* \{c} = \{!(getCursor l)} + \{tagSize}; // STATIC INDEX \{show (getStaticIndex loc)} in \{show (getLocRegion loc)}"
           pure c
+
+defineEndWitness : (loc : Loc r t) -> String -> M ()
+defineEndWitness loc value = do
+  cur <- getCursor loc
+  let ew = "\{cur}_end"
+  modify {endwitness $= insert (show loc) ew}
+  emit "char* \{ew} = \{value};"
 
 declareEndWitness : (loc : Loc r t) -> M String
 declareEndWitness loc = do
@@ -253,10 +276,19 @@ fillDyn {r} {loc} (MkI64 i) = do
   addStaticSizeEndWitness loc 8 "I64"
   emit "*(int*) \{cur} = \{i};"
 
-fillDyn {loc} (MkTup2 a b) = do
-  lift $ putStrLn " ++ MkTup2"
+fillDyn {loc} (MkSTup2 a b) = do
+  lift $ putStrLn " ++ MkSTup2"
   cur <- genCursor loc
   fillDyn a
+  fillDyn b
+  updateEndWitnessTo loc b
+
+fillDyn {loc} (MkRTup2 a b) = do
+  lift $ putStrLn " ++ MkRTup2"
+  cur <- genCursor loc -- cursor for RTup2, which is: indirection-to-snd/fst-endwitness + fst + snd
+  fillDyn a
+  when (isStaticSize (getTy a)) $ do
+    emit "*(char**) \{cur} = \{!(getEndWitness $ getLoc a)};"
   fillDyn b
   updateEndWitnessTo loc b
 
@@ -306,9 +338,13 @@ fillDyn (PrjFst {r} a cont) = do
   lift $ putStrLn " ++ PrjFst"
   fillDyn a
   fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
-fillDyn (PrjSnd a cont) = do
+fillDyn (PrjSnd {a, loc} tup cont) = do
   lift $ putStrLn " ++ PrjSnd"
-  fillDyn a
+  fillDyn tup
+  let locFst = LocAfterTag "RTup2" a loc
+  case getStaticSize a of
+    Just s  => addStaticSizeEndWitness locFst s "static index for RTup2Snd"
+    Nothing => defineEndWitness locFst "*(char**)\{!(getCursor loc)}; // get Snd cursor from RTup2" -- get random access pointer to snd
   fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
 
 fillDyn {loc} (PrintI64 {loc_in} a) = do
@@ -443,4 +479,9 @@ toBufferDyn {t} e = do
   Q: which design is better?
     a) linear cursor passing
     b) sequence of statically indexed blocks with dynamic base index
+
+  IDEA:
+    done - add two kind of tules: SerialTup2 (STup2) and RandomAccessTup2 (RTup2)
+  TODO:
+    done - allocate RTup2 snd indirection only when fst size is not statically known
 -}
