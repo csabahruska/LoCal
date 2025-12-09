@@ -139,6 +139,10 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
   -- primitive values
   MkI64 : Int -> Exp I64 loc
 
+  -- I64 primops
+  AddI64 : {r_in : _} -> {r_in2 : _} -> {loc_in : Loc r_in I64} -> {loc_in2 : Loc r_in2 I64} -> Exp I64 loc_in -> Exp I64 loc_in2 -> Exp I64 loc
+  EqI64  : {r_in : _} -> {r_in2 : _} -> {loc_in : Loc r_in I64} -> {loc_in2 : Loc r_in2 I64} -> Exp I64 loc_in -> Exp I64 loc_in2 -> Exp (Either T0 T0) loc
+
   -- value shapes, ADT can be modeled with these
   {-
     MkTup2 is the only place that introduces after relation between locations
@@ -205,10 +209,14 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
                let locR = LocAfterTag "Right" b scrut_loc in
                (Exp a locL -> Exp c loc_out) -> (Exp b locR -> Exp c loc_out) -> Exp c loc_out
                -- PROBLEM/TODO: what if the output size differs?
+               -- A: there is no problem because the location would be the same and the end witness will be different
                -- IDEAS: is the result size an Either Int Int?
-{-
-  FunApp : Fun arg res -> Exp arg r_in -> Exp res r_out
--}
+
+  FunApp : {r_in : _} -> {r_out : _} -> {loc_in : Loc r_in arg} -> {loc_out : Loc r_out res} -> Fun arg res -> Exp arg loc_in -> Exp res loc_out
+  -- TODO: check the typing rules for function application in LoCal type system
+  FunApp2 : {r_in : _} -> {r_out : _} -> {loc_in : Loc r_in arg} -> {loc_out : Loc r_out res} ->
+            String ->
+            (Exp arg loc_in -> Exp res loc_out) -> Exp arg loc_in -> Exp res loc_out
 
   -- internal
   Var : {-{a : _} -> {r : _} -> {loc : Loc r a} ->-} Exp a loc
@@ -216,13 +224,16 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
 public export
 data Fun : (arg : Ty) -> (res : Ty) -> Type where
   MkFunId : Int -> Fun arg res
-{-
+
 public export
 data Program : Type where
+  Main2  : (Exp T0 (LocStart T0 (MkRegion (-1))) -> Exp res (LocStart res (MkRegion (-2)))) -> Program
+  Main3  : {res : Ty} -> Exp res (LocStart res (MkRegion (-4))) -> Program
   Main  : (main : Fun T0 res) -> Program
-  MkDec : {arg : Ty} -> {res : Ty} -> (Fun arg res -> Program) -> Program
-  MkDef : {arg : Ty} -> {res : Ty} -> Fun arg res -> (Exp arg r_in -> Exp res r_out) -> Program -> Program
--}
+  MkDec : {- {arg : Ty} -> {res : Ty} -> -} (Fun arg res -> Program) -> Program
+  MkDef : {arg : Ty} -> {res : Ty}{- -> {r_in : _} -> {r_out : _}-} -> {loc_in : Loc r_in arg} -> {loc_out : Loc r_out res}
+          -> Fun arg res -> (Exp arg loc_in -> Exp res loc_out) -> Program -> Program
+
 -- -------------------------------
 
 {-

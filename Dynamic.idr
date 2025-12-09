@@ -4,11 +4,32 @@ import LoCal
 --import Instances
 import Data.Maybe
 import Data.SortedMap
+import Data.SortedSet
 import Data.String
 import Control.Monad.State
 import Data.Primitives.Interpolation
 import Control.ANSI
 
+data Effect = Read | Write | Allocated | Traversed
+
+ordTagEffect : Effect -> Int
+ordTagEffect Read       = 0
+ordTagEffect Write      = 1
+ordTagEffect Allocated  = 2
+ordTagEffect Traversed  = 3
+
+Eq Effect where a == b = ordTagEffect a == ordTagEffect b
+Ord Effect where compare a b = compare (ordTagEffect a) (ordTagEffect b)
+
+showEffect : Effect -> String
+showEffect = \case
+  Read      => "Read"
+  Write     => "Write"
+  Allocated => "Allocated"
+  Traversed => "Traversed"
+
+Show Effect where show = showEffect
+Interpolation Effect where interpolate = show
 
 showRegion : Region -> String
 showRegion (MkRegion i) = "MkRegion \{i}"
@@ -126,6 +147,7 @@ record CG where
   counter     : Int
   locations   : SortedMap String String
   endwitness  : SortedMap String String
+  effects     : SortedMap String (SortedSet Effect)
   code        : List String
   indentLevel : Nat
 
@@ -134,6 +156,7 @@ emptyCG = MkCG
   { counter     = 0
   , locations   = empty
   , endwitness  = empty
+  , effects     = empty
   , code        = []
   , indentLevel = 0
   }
@@ -182,6 +205,21 @@ getLoc {l} _ = l
 
 addCur : String -> Loc r t -> M ()
 addCur c l = modify {locations $= insert (show l) c}
+
+-- effect handling
+addEffect : (loc : Loc r t) -> Effect -> M ()
+addEffect _ _ = pure () -- TODO
+
+reqEffect : (loc : Loc r t) -> Effect -> M ()
+reqEffect _ _ = pure () -- TODO
+
+getEffect : (loc : Loc r t) -> M (SortedSet Effect)
+getEffect loc = do
+  effs <- gets effects
+  let Just eff = lookup (show loc) effs
+        | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc cursor for \{loc}\n effect map: \{show effs}"
+  pure eff
+
 
 -- IDEA: use Loc values in Map as keys via its show function
 
@@ -261,8 +299,10 @@ updateEndWitnessTo {loc2} loc e = do
   modify {endwitness $= insert (show loc) ew}
   lift $ print $ colored BrightBlue " update endwitness to \{ew} for\n \{loc}\n\n"
 
-addStaticSizeEndWitness : (loc : Loc r t) -> Int -> String -> M ()
-addStaticSizeEndWitness l bytes msg = do
+addStaticSizeEndWitness : {t : _} -> (loc : Loc r t) -> String -> M ()
+addStaticSizeEndWitness {t} l msg = do
+  let Just bytes = getStaticSize t
+        | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing statis size for: \{l}"
   cur <- getCursor l
   let ew = "\{cur}_end"
   modify {endwitness $= insert (show l) ew}
@@ -273,7 +313,7 @@ partial fillDyn : {r : _ } -> {t : _ } -> {loc : Loc r t} -> Exp t loc -> M ()
 fillDyn {r} {loc} (MkI64 i) = do
   lift $ putStrLn " ++ MkI64 \{i}"
   cur <- genCursor loc
-  addStaticSizeEndWitness loc 8 "I64"
+  addStaticSizeEndWitness loc "I64"
   emit "*(int*) \{cur} = \{i};"
 
 fillDyn {loc} (MkSTup2 a b) = do
@@ -305,7 +345,7 @@ fillDyn {loc} (MkRTup2 a b) = do
 fillDyn {loc} (MkInd {loc_in} _) = do
   lift $ putStrLn " ++ MkInd"
   cur <- genCursor loc
-  addStaticSizeEndWitness loc 8 "Ind" -- 64 bit pointer
+  addStaticSizeEndWitness loc "Ind" -- 64 bit pointer
   cur_in <- getCursor loc_in
   -- TODO: support forward pointers
   -- Q: how to decide if a location is after or before of another?
@@ -316,7 +356,7 @@ fillDyn {loc} (MkInd {loc_in} _) = do
 fillDyn {loc} (MkIndLong {loc_in} _) = do
   lift $ putStrLn " ++ MkIndLong"
   cur <- genCursor loc
-  addStaticSizeEndWitness loc 8 "IndLong" -- 64 bit pointer
+  addStaticSizeEndWitness loc "IndLong" -- 64 bit pointer
   cur_in <- getCursor loc_in
   emit "*(char**) \{cur} = \{cur_in};"
 
@@ -343,15 +383,39 @@ fillDyn (PrjSnd {a, loc} tup cont) = do
   fillDyn tup
   let locFst = LocAfterTag "RTup2" a loc
   case getStaticSize a of
-    Just s  => addStaticSizeEndWitness locFst s "static index for RTup2Snd"
+    Just _  => addStaticSizeEndWitness locFst "static index for RTup2Snd"
     Nothing => defineEndWitness locFst "*(char**)\{!(getCursor loc)}; // get Snd cursor from RTup2" -- get random access pointer to snd
   fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
+
+fillDyn {loc} (AddI64 {loc_in, loc_in2} a b) = do
+  lift $ putStrLn " ++ AddI64"
+  fillDyn a
+  fillDyn b
+  cur <- genCursor loc
+  addStaticSizeEndWitness loc "I64"
+  cur_in <- getCursor loc_in
+  cur_in2 <- getCursor loc_in2
+  emit "*(int*) \{cur} = *(int*) \{cur_in} + *(int*) \{cur_in2};"
+
+fillDyn {loc} (EqI64 {loc_in, loc_in2} a b) = do
+  lift $ putStrLn " ++ EqI64"
+  fillDyn a
+  fillDyn b
+  cur <- genCursor loc
+  addStaticSizeEndWitness loc "Either T0 T0 (alias Bool)"
+  cur_in <- getCursor loc_in
+  cur_in2 <- getCursor loc_in2
+  emit "if (*(int*) \{cur_in} == *(int*) \{cur_in2}) { // true"
+  indent $ emit "*(char*) \{cur} = 1; // RIGHT_TAG"
+  emit "} else { // false"
+  indent $ emit "*(char*) \{cur} = 0; // LEFT_TAG"
+  emit "}"
 
 fillDyn {loc} (PrintI64 {loc_in} a) = do
   lift $ putStrLn " ++ PrintI64"
   fillDyn a
   cur <- genCursor loc
-  addStaticSizeEndWitness loc 0 "T0"
+  addStaticSizeEndWitness loc "T0"
   cur_in <- getCursor loc_in
   emit "printf(\"%ld\\n\", *(int*) \{cur_in});"
 
