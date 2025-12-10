@@ -306,19 +306,6 @@ defineEndWitness loc value = do
   modify {local.endwitness $= insert (show loc) ew}
   emit "char* \{ew} = \{value};"
 
-declareEndWitness : (loc : Loc r t) -> M String
-declareEndWitness loc = do
-  cur <- getCursor loc
-  let ew = "\{cur}_end"
-  modify {local.endwitness $= insert (show loc) ew}
-  emit "char* \{ew} = 0; // uninitialized"
-  pure ew
-
-setEndWitnessTo : {loc2 : _} -> String -> Exp _ loc2 -> M ()
-setEndWitnessTo {loc2} ew _ = do
-  ew2 <- getEndWitness loc2
-  emit "\{ew} = \{ew2};"
-
 updateEndWitnessTo : {loc2 : _} -> (loc : Loc r t) -> Exp _ loc2 -> M ()
 updateEndWitnessTo {loc2} loc e = do
   ew <- getEndWitness loc2
@@ -404,6 +391,7 @@ fillDyn (PrjFst {r} a cont) = do
   lift $ putStrLn " ++ PrjFst"
   fillDyn a
   fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
+  -- Q: is endwintness needed for fst?
 fillDyn (PrjSnd {a, loc} tup cont) = do
   lift $ putStrLn " ++ PrjSnd"
   fillDyn tup
@@ -412,6 +400,7 @@ fillDyn (PrjSnd {a, loc} tup cont) = do
     Just _  => addStaticSizeEndWitness locFst "static index for RTup2Snd"
     Nothing => defineEndWitness locFst "*(char**)\{!(getCursor loc)}; // get Snd cursor from RTup2" -- get random access pointer to snd
   fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
+  -- Q: is endwintness needed for snd?
 
 fillDyn {loc} (AddI64 {loc_in, loc_in2} a b) = do
   lift $ putStrLn " ++ AddI64"
@@ -466,19 +455,21 @@ fillDyn {loc} (CaseEither {scrut_loc} scrut cont_left cont_right) = do
   lift $ putStrLn " ++ CaseEither"
   fillDyn scrut
   cur <- genCursor loc
-  cur_end <- declareEndWitness loc
+  let cur_end_tmp = "\{!(newCursorName)}_end_tmp"
+  emit "char* \{cur_end_tmp} = 0; // uninitalized"
   cur_tag <- getCursor scrut_loc
   emit "if (*(char*) \{cur_tag} == 0) { // LEFT"
   indent $ localScope $ do
     let expL = cont_left Var
     fillDyn expL
-    setEndWitnessTo cur_end expL
+    emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expL)};"
   emit "} else { // RIGHT"
   indent $ localScope $ do
     let expR = cont_right Var
     fillDyn expR
-    setEndWitnessTo cur_end expR
+    emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expR)};"
   emit "}"
+  defineEndWitness loc cur_end_tmp
 
 fillDyn {loc} (Copy {r_in, loc_in} _) = do
   lift $ putStrLn " ++ Copy"
@@ -486,6 +477,7 @@ fillDyn {loc} (Copy {r_in, loc_in} _) = do
   cur_dst <- genCursor loc
   cur_src_end <- getEndWitness loc_in
   emit "memcpy(\{cur_dst}, \{cur_src}, \{cur_src_end} - \{cur_src});"
+  defineEndWitness loc "\{cur_dst} + (\{cur_src_end} - \{cur_src})"
 
 fillDyn {t} Var = emit "// Var \{t}" -- assert_total $ idris_crash $ "Var"
 
