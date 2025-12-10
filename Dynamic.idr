@@ -142,23 +142,35 @@ getStaticIndex = \case
 
 -- codegen monad
 
-record CG where
-  constructor MkCG
-  counter     : Int
+record CGLocal where
+  constructor MkCGLocal
   locations   : SortedMap String String
   endwitness  : SortedMap String String
   effects     : SortedMap String (SortedSet Effect)
-  code        : List String
+  funName     : String
   indentLevel : Nat
+
+record CG where
+  constructor MkCG
+  -- global
+  counter     : Int
+  code        : SortedMap String (List String)
+  local       : CGLocal
+
+emptyCGLocal : CGLocal
+emptyCGLocal = MkCGLocal
+  { locations   = empty
+  , endwitness  = empty
+  , effects     = empty
+  , funName     = ""
+  , indentLevel = 0
+  }
 
 emptyCG : CG
 emptyCG = MkCG
   { counter     = 0
-  , locations   = empty
-  , endwitness  = empty
-  , effects     = empty
-  , code        = []
-  , indentLevel = 0
+  , code        = empty
+  , local       = emptyCGLocal
   }
 
 M = StateT CG IO
@@ -177,25 +189,39 @@ newCursorName = pure "cur\{!newId}"
 
 indent : M a -> M a
 indent m = do
-  l <- gets (.indentLevel)
-  modify {indentLevel $= (+ 1)}
+  l <- gets (.local.indentLevel)
+  modify {local.indentLevel $= (+ 1)}
   res <- m
-  modify {indentLevel := l}
+  modify {local.indentLevel := l}
   pure res
 
 localScope : M a -> M a
 localScope m = do
-  locs <- gets (.locations)
-  endws <- gets (.endwitness)
+  locs <- gets (.local.locations)
+  endws <- gets (.local.endwitness)
   res <- m
-  modify {locations := locs, endwitness := endws}
+  modify {local.locations := locs, local.endwitness := endws}
   pure res
 
 emit : String -> M ()
 emit s = do
   cg <- get
-  lift $ putStrLn s
-  modify {code $= (::) (indent (cg.indentLevel * 2) s)}
+  lift $ putStrLn "[\{cg.local.funName}] \{s}"
+  modify {code $= insertWith (++) cg.local.funName [indent (cg.local.indentLevel * 2) s]}
+
+
+genFunction : String -> M a -> M a
+genFunction fun_name action = do
+  l <- gets (.local)
+  modify {local := emptyCGLocal}
+  modify {local.funName := fun_name}
+  modify {code $= insert fun_name []}
+  result <- action
+  modify {local := l}
+  pure result
+
+isNewFunction : String -> M Bool
+isNewFunction funName = pure $ isNothing (lookup funName !(gets code))
 
 getTy : {t : _} -> {0 l : Loc r t} -> (Exp t l) -> Ty
 getTy {t} _ = t
@@ -204,7 +230,7 @@ getLoc : {t : _} -> {l : Loc r t} -> (Exp t l) -> Loc r t
 getLoc {l} _ = l
 
 addCur : String -> Loc r t -> M ()
-addCur c l = modify {locations $= insert (show l) c}
+addCur c l = modify {local.locations $= insert (show l) c}
 
 -- effect handling
 addEffect : (loc : Loc r t) -> Effect -> M ()
@@ -215,7 +241,7 @@ reqEffect _ _ = pure () -- TODO
 
 getEffect : (loc : Loc r t) -> M (SortedSet Effect)
 getEffect loc = do
-  effs <- gets effects
+  effs <- gets (.local.effects)
   let Just eff = lookup (show loc) effs
         | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc cursor for \{loc}\n effect map: \{show effs}"
   pure eff
@@ -225,14 +251,14 @@ getEffect loc = do
 
 getEndWitness : (loc : Loc r t) -> M String
 getEndWitness loc = do
-  ends <- gets endwitness
+  ends <- gets (.local.endwitness)
   let Just ew = lookup (show loc) ends
         | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc endwitness for \{loc}\n endwitness map: \{show ends}"
   pure ew
 
 getCursor : (loc : Loc r t) -> M String
 getCursor loc = do
-  locs <- gets locations
+  locs <- gets (.local.locations)
   let Just cur = lookup (show loc) locs
         | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc cursor for \{loc}\n locations map: \{show locs}"
   pure cur
@@ -246,14 +272,14 @@ genCursor {r} loc = do
     gen new if does not exist
     return exisiting when available
   -}
-  locs <- gets locations
+  locs <- gets (.local.locations)
   let newCur = do
         c <- newCursorName
         lift $ print $ colored BrightRed " !! add cursor \{c} :=\n \{loc}\n\n"
         lift $ print $ colored BrightMagenta " !! static index \{c} := \{show (getStaticIndex loc)}\n\n"
         addCur c loc
         pure c
-  case lookup locKey !(gets locations) of
+  case lookup locKey !(gets (.local.locations)) of
     Just v  => do
       lift $ print $ colored BrightGreen " !! has cursor \{v} :=\n \{loc}\n\n"
       pure v
@@ -277,14 +303,14 @@ defineEndWitness : (loc : Loc r t) -> String -> M ()
 defineEndWitness loc value = do
   cur <- getCursor loc
   let ew = "\{cur}_end"
-  modify {endwitness $= insert (show loc) ew}
+  modify {local.endwitness $= insert (show loc) ew}
   emit "char* \{ew} = \{value};"
 
 declareEndWitness : (loc : Loc r t) -> M String
 declareEndWitness loc = do
   cur <- getCursor loc
   let ew = "\{cur}_end"
-  modify {endwitness $= insert (show loc) ew}
+  modify {local.endwitness $= insert (show loc) ew}
   emit "char* \{ew} = 0; // uninitialized"
   pure ew
 
@@ -296,7 +322,7 @@ setEndWitnessTo {loc2} ew _ = do
 updateEndWitnessTo : {loc2 : _} -> (loc : Loc r t) -> Exp _ loc2 -> M ()
 updateEndWitnessTo {loc2} loc e = do
   ew <- getEndWitness loc2
-  modify {endwitness $= insert (show loc) ew}
+  modify {local.endwitness $= insert (show loc) ew}
   lift $ print $ colored BrightBlue " update endwitness to \{ew} for\n \{loc}\n\n"
 
 addStaticSizeEndWitness : {t : _} -> (loc : Loc r t) -> String -> M ()
@@ -305,7 +331,7 @@ addStaticSizeEndWitness {t} l msg = do
         | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing statis size for: \{l}"
   cur <- getCursor l
   let ew = "\{cur}_end"
-  modify {endwitness $= insert (show l) ew}
+  modify {local.endwitness $= insert (show l) ew}
   emit "char* \{ew} = \{cur} + \{bytes}; // \{msg}"
   lift $ print $ colored BrightCyan " add endwitness to \{ew} for\n \{l}\n\n"
 
@@ -463,15 +489,56 @@ fillDyn {loc} (Copy {r_in, loc_in} _) = do
 
 fillDyn {t} Var = emit "// Var \{t}" -- assert_total $ idris_crash $ "Var"
 
+fillDyn {loc} (FunApp2 {loc_in} fun_name fun arg) = do
+  lift $ putStrLn " ++ FunApp2 \{fun_name}"
+  fillDyn arg
+  cur_out <- genCursor loc
+  cur_in <- getCursor loc_in
+  -- TODO: omit end-witness for static sized outputs
+  -- TODO: addStaticSizeEndWitness loc "T0"
+  defineEndWitness loc "\{fun_name}(\{cur_in}, \{cur_out})"
+  -- codegen function if needed
+  when !(isNewFunction fun_name) $ do
+    genFunction fun_name $ do
+      cur_arg <- newCursorName
+      addCur cur_arg loc_in
+      cur_out <- newCursorName
+      addCur cur_out loc
+      emit "char* \{fun_name}(char* \{cur_arg}, char* \{cur_out}) {"
+      indent $ do
+        fillDyn (fun Var)
+        emit "return \{!(getEndWitness loc)};"
+      emit "}"
+
+c_header : String
+c_header = """
+  #include <stdio.h>
+  #include <stdlib.h>
+  #include <string.h>
+
+  char* newRegion() {
+    return malloc(1024);
+  }
+
+  """
+
 partial public export
 toBufferDyn : {t : _} -> Exp t (LocStart t (MkRegion (-1))) -> IO String
 toBufferDyn {t} e = do
   print $ background Yellow " ---- CODEGEN ----"
   putStrLn ""
   s <- execStateT emptyCG $ do
-    fillDyn $ LetRegionValue (MkRegion (-1)) e id
+    genFunction "main" $ do
+      emit "void main() {"
+      indent $ fillDyn $ LetRegionValue (MkRegion (-1)) e id
+      emit "}"
   putStrLn " ---- CODE OUTPUT ----"
-  pure $ unlines $ reverse s.code
+  pure $ unlines $ c_header :: [unlines (reverse funLines) | funLines <- values s.code]
+
+partial public export
+compileProgram : Program -> IO String
+compileProgram (Main3 e) = toBufferDyn e
+--  Main3  : {res : Ty} -> Exp res (LocStart res (MkRegion (-4))) -> Program
 
 {-
   INSIGHTS:

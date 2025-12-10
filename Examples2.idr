@@ -240,15 +240,17 @@ test_6 =
           (\t => Copy ten)
   in Main3 $
       LetRegion $ \r =>
-      LetRegionValue r (MkI64 0) $ \i =>
-      FunApp2 "genList" genList i
+      LetRegionValue r (MkI64 1) $ \i =>
+      LetRegion $ \r =>
+      LetRegionValue r (FunApp2 "genList" genList i) $ \i =>
+      PrintI64 i
 
 {-
   TODO:
     handle:
-        Program
-        Main3
-        FunApp2
+ done - Program
+ done - Main3
+ done - FunApp2
  done - AddI64
  done - EqI64
 -}
@@ -283,4 +285,5 @@ main = do
   --putStr !(toBufferDyn sample_print_either_elim4)
   --putStr !(toBufferDyn sample_print_either_elim2)
   --putStr !(toBufferDyn sample_print_either_elim5_forward_ind) -- TODO
-  putStr !(toBufferDyn sample_print_either_elim5_backward_ind)
+  --putStr !(toBufferDyn sample_print_either_elim5_backward_ind)
+  putStr !(compileProgram test_6)

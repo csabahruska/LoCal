@@ -214,9 +214,9 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
 
   FunApp : {r_in : _} -> {r_out : _} -> {loc_in : Loc r_in arg} -> {loc_out : Loc r_out res} -> Fun arg res -> Exp arg loc_in -> Exp res loc_out
   -- TODO: check the typing rules for function application in LoCal type system
-  FunApp2 : {r_in : _} -> {r_out : _} -> {loc_in : Loc r_in arg} -> {loc_out : Loc r_out res} ->
+  FunApp2 : {r_in : _} -> {r_out : _} -> {t_arg : _} -> {loc_in : Loc r_in t_arg} -> {loc_out : Loc r_out res} ->
             String ->
-            (Exp arg loc_in -> Exp res loc_out) -> Exp arg loc_in -> Exp res loc_out
+            (Exp t_arg loc_in -> Exp res loc_out) -> Exp t_arg loc_in -> Exp res loc_out
 
   -- internal
   Var : {-{a : _} -> {r : _} -> {loc : Loc r a} ->-} Exp a loc
@@ -228,7 +228,7 @@ data Fun : (arg : Ty) -> (res : Ty) -> Type where
 public export
 data Program : Type where
   Main2  : (Exp T0 (LocStart T0 (MkRegion (-1))) -> Exp res (LocStart res (MkRegion (-2)))) -> Program
-  Main3  : {res : Ty} -> Exp res (LocStart res (MkRegion (-4))) -> Program
+  Main3  : {res : Ty} -> Exp res (LocStart res (MkRegion (-1))) -> Program
   Main  : (main : Fun T0 res) -> Program
   MkDec : {- {arg : Ty} -> {res : Ty} -> -} (Fun arg res -> Program) -> Program
   MkDef : {arg : Ty} -> {res : Ty}{- -> {r_in : _} -> {r_out : _}-} -> {loc_in : Loc r_in arg} -> {loc_out : Loc r_out res}
