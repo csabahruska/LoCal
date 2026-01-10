@@ -2,6 +2,7 @@ module Dynamic
 
 import LoCal
 --import Instances
+import Data.List.Elem
 import Data.Maybe
 import Data.SortedMap
 import Data.SortedSet
@@ -45,8 +46,7 @@ showTy t = case t of
   Either a b  => "Either (\{showTy a}) (\{showTy b})"
   I64         => "I64"
   Ind a       => "Ind (\{showTy a})"
-  DecTy n     => "DecTy \{n}"
-  DefTy a b c => "DefTy (\{showTy a}) (\{showTy b}) (\{showTy c})"
+  BoxTy i     => "BoxTy \{elemToNat i}"
 
 Show Ty where show = showTy
 Interpolation Ty where interpolate = show
@@ -56,6 +56,7 @@ showLoc loc = case loc of
   LocStart t r => "LocStart (\{show t}) (\{show r})"
   LocAfter t l => "LocAfter (\{show t})\n (\{showLoc l})"
   LocAfterTag s t l => "LocAfterTag \{s} (\{show t})\n (\{showLoc l})"
+  LocBoxCoerce t l => "LocBoxCoerce (\{show t})\n (\{showLoc l})"
 
 Show (Loc r t) where show = showLoc
 Interpolation (Loc r t) where interpolate = show
@@ -94,8 +95,8 @@ getStaticSize = \case
     if sa == sb -- special case, when the left and right size matches and statically known
       then Just (1 + sa)
       else Nothing
-  DecTy _ => Nothing
-  DefTy _ _ a => getStaticSize a
+  BoxTy _ => Nothing
+
 {-
 data LocItem : Type where
   MkLocItem : Loc r t -> LocItem
@@ -113,6 +114,7 @@ getLocTy : Loc r t -> Ty
 getLocTy (LocStart t _) = t
 getLocTy (LocAfter t _) = t
 getLocTy (LocAfterTag _ t _) = t
+getLocTy (LocBoxCoerce t _) = t
 
 getLocRegion : {r : _} -> Loc r t -> Region
 getLocRegion {r} _ = r
@@ -139,6 +141,7 @@ getStaticIndex = \case
   LocAfterTag _ _ l => do
     i <- getStaticIndex l
     Just (1 + i)
+  LocBoxCoerce _ _ => Nothing
 
 -- codegen monad
 
@@ -298,6 +301,7 @@ genCursor {r} loc = do
           c <- newCur
           emit "char* \{c} = \{!(getCursor l)} + \{tagSize}; // STATIC INDEX \{show (getStaticIndex loc)} in \{show (getLocRegion loc)}"
           pure c
+        LocBoxCoerce _ l => genCursor l
 
 defineEndWitness : (loc : Loc r t) -> String -> M ()
 defineEndWitness loc value = do
@@ -323,20 +327,20 @@ addStaticSizeEndWitness {t} l msg = do
   lift $ print $ colored BrightCyan " add endwitness to \{ew} for\n \{l}\n\n"
 
 partial fillDyn : {r : _ } -> {t : _ } -> {loc : Loc r t} -> Exp t loc -> M ()
-fillDyn {r} {loc} (MkI64 i) = do
+fillDyn (MkI64 i) = do
   lift $ putStrLn " ++ MkI64 \{i}"
   cur <- genCursor loc
   addStaticSizeEndWitness loc "I64"
   emit "*(int*) \{cur} = \{i};"
 
-fillDyn {loc} (MkSTup2 a b) = do
+fillDyn (MkSTup2 a b) = do
   lift $ putStrLn " ++ MkSTup2"
   cur <- genCursor loc
   fillDyn a
   fillDyn b
   updateEndWitnessTo loc b
 
-fillDyn {loc} (MkRTup2 a b) = do
+fillDyn (MkRTup2 a b) = do
   lift $ putStrLn " ++ MkRTup2"
   cur <- genCursor loc -- cursor for RTup2, which is: indirection-to-snd/fst-endwitness + fst + snd
   fillDyn a
@@ -355,7 +359,7 @@ fillDyn {loc} (MkRTup2 a b) = do
   TODO: track effects for locations
 -}
 
-fillDyn {loc} (MkInd {loc_in} _) = do
+fillDyn (MkInd {loc_in} _) = do
   lift $ putStrLn " ++ MkInd"
   cur <- genCursor loc
   addStaticSizeEndWitness loc "Ind" -- 64 bit pointer
@@ -366,43 +370,43 @@ fillDyn {loc} (MkInd {loc_in} _) = do
   --  TODO: write such a function
   emit "*(char**) \{cur} = \{cur_in};"
 
-fillDyn {loc} (MkIndLong {loc_in} _) = do
+fillDyn (MkIndLong {loc_in} _) = do
   lift $ putStrLn " ++ MkIndLong"
   cur <- genCursor loc
   addStaticSizeEndWitness loc "IndLong" -- 64 bit pointer
   cur_in <- getCursor loc_in
   emit "*(char**) \{cur} = \{cur_in};"
 
-fillDyn {loc} (MkLeft a) = do
+fillDyn (MkLeft a) = do
   lift $ putStrLn " ++ MkLeft"
   cur <- genCursor loc
   emit "*(char*) \{cur} = 0; // LEFT_TAG"
   fillDyn a
   updateEndWitnessTo loc a
 
-fillDyn {loc} (MkRight b) = do
+fillDyn (MkRight b) = do
   lift $ putStrLn " ++ MkRight"
   cur <- genCursor loc
   emit "*(char*) \{cur} = 1; // RIGHT_TAG"
   fillDyn b
   updateEndWitnessTo loc b
 
-fillDyn (PrjFst {r} a cont) = do
+fillDyn (PrjFst a cont) = do
   lift $ putStrLn " ++ PrjFst"
   fillDyn a
   fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
   -- Q: is endwintness needed for fst?
-fillDyn (PrjSnd {a, loc} tup cont) = do
+fillDyn (PrjSnd {a, loc_tup} tup cont) = do
   lift $ putStrLn " ++ PrjSnd"
   fillDyn tup
-  let locFst = LocAfterTag "RTup2" a loc
+  let locFst = LocAfterTag "RTup2" a loc_tup
   case getStaticSize a of
     Just _  => addStaticSizeEndWitness locFst "static index for RTup2Snd"
     Nothing => defineEndWitness locFst "*(char**)\{!(getCursor loc)}; // get Snd cursor from RTup2" -- get random access pointer to snd
   fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
   -- Q: is endwintness needed for snd?
 
-fillDyn {loc} (AddI64 {loc_in, loc_in2} a b) = do
+fillDyn (AddI64 {loc_in, loc_in2} a b) = do
   lift $ putStrLn " ++ AddI64"
   fillDyn a
   fillDyn b
@@ -412,7 +416,7 @@ fillDyn {loc} (AddI64 {loc_in, loc_in2} a b) = do
   cur_in2 <- getCursor loc_in2
   emit "*(int*) \{cur} = *(int*) \{cur_in} + *(int*) \{cur_in2};"
 
-fillDyn {loc} (EqI64 {loc_in, loc_in2} a b) = do
+fillDyn (EqI64 {loc_in, loc_in2} a b) = do
   lift $ putStrLn " ++ EqI64"
   fillDyn a
   fillDyn b
@@ -426,7 +430,7 @@ fillDyn {loc} (EqI64 {loc_in, loc_in2} a b) = do
   indent $ emit "*(char*) \{cur} = 0; // LEFT_TAG"
   emit "}"
 
-fillDyn {loc} (PrintI64 {loc_in} a) = do
+fillDyn (PrintI64 {loc_in} a) = do
   lift $ putStrLn " ++ PrintI64"
   fillDyn a
   cur <- genCursor loc
@@ -434,7 +438,7 @@ fillDyn {loc} (PrintI64 {loc_in} a) = do
   cur_in <- getCursor loc_in
   emit "printf(\"%ld\\n\", *(int*) \{cur_in});"
 
-fillDyn {t} (LetRegion cont) = do
+fillDyn (LetRegion cont) = do
   lift $ putStrLn " ++ LetRegion"
   let r = MkRegion !newId
   fillDyn (cont r)
@@ -451,7 +455,7 @@ fillDyn (LetRegionValue {a,t} r v cont) = do
 {-
 fillDyn (Let {r_in} {loc_in} a cont) = fillDyn {r=r_in} {loc=loc_in} a >> fillDyn (cont a)
 -}
-fillDyn {loc} (CaseEither {scrut_loc} scrut cont_left cont_right) = do
+fillDyn (CaseEither {scrut_loc} scrut cont_left cont_right) = do
   lift $ putStrLn " ++ CaseEither"
   fillDyn scrut
   cur <- genCursor loc
@@ -471,7 +475,7 @@ fillDyn {loc} (CaseEither {scrut_loc} scrut cont_left cont_right) = do
   emit "}"
   defineEndWitness loc cur_end_tmp
 
-fillDyn {loc} (Copy {r_in, loc_in} _) = do
+fillDyn (Copy {r_in, loc_in} _) = do
   lift $ putStrLn " ++ Copy"
   cur_src <- getCursor loc_in
   cur_dst <- genCursor loc
@@ -479,9 +483,9 @@ fillDyn {loc} (Copy {r_in, loc_in} _) = do
   emit "memcpy(\{cur_dst}, \{cur_src}, \{cur_src_end} - \{cur_src});"
   defineEndWitness loc "\{cur_dst} + (\{cur_src_end} - \{cur_src})"
 
-fillDyn {t} Var = emit "// Var \{t}" -- assert_total $ idris_crash $ "Var"
+fillDyn Var = emit "// Var \{t}" -- assert_total $ idris_crash $ "Var"
 
-fillDyn {loc} (FunApp2 {loc_in} fun_name fun arg) = do
+fillDyn (FunApp2 {loc_in} fun_name fun arg) = do
   lift $ putStrLn " ++ FunApp2 \{fun_name}"
   fillDyn arg
   cur_out <- genCursor loc
@@ -612,7 +616,7 @@ compileProgram (Main3 e) = toBufferDyn e
     done - allocate RTup2 snd indirection only when fst size is not statically known
     - finish LoCal:
       + effect tracking during codegen
-      + add function support
+      done + add function support
     - add high level Exp
       + adt support
       + no locations
