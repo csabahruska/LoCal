@@ -1,20 +1,18 @@
 module LoCal
 
-public export
-data Ty
-  = T0
-  | STup2 Ty Ty   -- serial access only, fst then snd
-  | RTup2 Ty Ty   -- random access, O(1) access of snd
-  | Either Ty Ty
-  | I64
-  | Ind Ty -- raw pointer ; no tag ; just the location data
-  -- IDEA: Offset - region local ; Ptr - cross region
-  -- recursive type support
-  | DecTy String
-  | DefTy Ty{-expect DecTy-} Ty Ty
+import Data.List.Elem
 
 public export
-FromString Ty where fromString = DecTy
+data Ty : Type where
+  T0 : Ty
+  STup2 : Ty -> Ty -> Ty   -- serial access only, fst then snd
+  RTup2 : Ty -> Ty -> Ty   -- random access, O(1) access of snd
+  Either : Ty -> Ty -> Ty
+  I64 : Ty
+  Ind : Ty -> Ty -- raw pointer ; no tag ; just the location data
+  -- IDEA: Offset - region local ; Ptr - cross region
+  -- recursive type support
+  BoxTy : {x : (Lazy Ty)} -> {xs : List (Lazy Ty)} -> Elem x xs -> Ty
 
 {-
   INSIGHT:
@@ -52,6 +50,7 @@ data Loc : (r : Region) -> (t : Ty) -> Type where
           --    ^ this should be a value variable instead of Ty, that would solve the sizeof problem with either's left/right
           --    Q: what problem would it cause?
   LocAfterTag : String -> (t : Ty) -> Loc r t_prev -> Loc r t         -- statically known ; used for jump over the tag
+  LocBoxCoerce : (t : Ty) -> Loc r t_prev -> Loc r t
 
 data Fun : (arg : Ty) -> (res : Ty) -> Type
 
@@ -133,10 +132,15 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
   MkIndLong : {r_in : _} -> {loc_in : Loc r_in t} -> Exp t loc_in -> Exp (Ind t) loc_ind      -- cross region
   DeRefLong : {r_in : _} -> {loc_in : Loc r_in t} -> Exp (Ind t) loc_ind -> Exp t loc_in      -- cross region
 
+  -- boxing
+  Box   : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc : Loc r _} -> Exp x (LocBoxCoerce _ loc) -> Exp (BoxTy i) loc
+  UnBox : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc : Loc r _} -> Exp (BoxTy i) (LocBoxCoerce _ loc) -> Exp x loc
+
   -- to copy values cross region
   Copy : {r_in : _} -> {loc_in : Loc r_in t} -> Exp t loc_in -> Exp t loc
 
   -- primitive values
+  MkT0 : Exp T0 loc
   MkI64 : Int -> Exp I64 loc
 
   -- I64 primops
@@ -175,12 +179,12 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
     INSIGHT: sharing poisons code, because requires interpretation
 -}
   -- random access tup2
-  PrjFst : {r : _} -> {a, b, c : Ty} -> {loc : Loc r _} -> {loc_out : Loc r_out _} -> Exp (RTup2 a b) loc ->
-            let locFst = LocAfterTag "RTup2" a loc in
+  PrjFst : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup _} -> {loc_out : Loc r_out _} -> Exp (RTup2 a b) loc_tup ->
+            let locFst = LocAfterTag "RTup2" a loc_tup in
             (Exp a locFst -> Exp c loc_out) -> Exp c loc_out
 
-  PrjSnd : {r : _} -> {a, b, c : Ty} -> {loc : Loc r _} -> {loc_out : Loc r_out _} -> Exp (RTup2 a b) loc ->
-            let locFst = LocAfterTag "RTup2" a loc in
+  PrjSnd : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup _} -> {loc_out : Loc r_out _} -> Exp (RTup2 a b) loc_tup ->
+            let locFst = LocAfterTag "RTup2" a loc_tup in
             let locSnd = LocAfter b locFst in
             (Exp b locSnd -> Exp c loc_out) -> Exp c loc_out
 
@@ -192,8 +196,8 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
               let locSnd = LocAfter b locFst in
               (Exp a locFst -> Exp c loc_out1) -> (Exp b locSnd -> Exp c loc_out1 -> Exp d loc_out2) -> Exp d loc_out2
   -}
-  CaseSTup2 : {r : _} -> {a, b, c : Ty} -> {loc : Loc r _} -> {loc_out : Loc r_out _} -> Exp (STup2 a b) loc ->
-              let locFst = LocAfterTag "STup2" a loc in
+  CaseSTup2 : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r _} -> {loc_out : Loc r_out _} -> Exp (STup2 a b) loc_tup ->
+              let locFst = LocAfterTag "STup2" a loc_tup in
               let locSnd = LocAfter b locFst in
               (Exp a locFst -> Exp b locSnd -> Exp c loc_out) -> Exp c loc_out
 {-
