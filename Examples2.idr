@@ -1,15 +1,34 @@
+module Examples2
+import Data.List.Elem
 import LoCal
 import Dynamic
+
+-------------------------------------------
+-- Boxing experiment --------------
+-------------------------------------------
 
 -- data IntList = Cons Int IntList
 --              | Nil
 
-i64ListTy : Ty
-i64ListTy =
-  let t = "i64List" in
-  DefTy t (Either (RTup2 I64 t) T0) t
+mutual
+  my_ty : Ty
+  my_ty = Either (RTup2 I64 my_ty_box) T0
 
+  my_ty_box : Ty
+  my_ty_box = BoxTy {x=my_ty} {xs=[my_ty]} Here
 
+sample_box_03 : {loc : _} -> Exp Examples2.my_ty loc
+sample_box_03 = MkRight MkT0
+
+sample_box_04 : {r : _} -> {loc : Loc r _} -> Exp Examples2.my_ty_box loc
+sample_box_04 = Box {x=delay my_ty} sample_box_03
+
+sample_box_05 : {r : _} -> {loc : Loc r _} -> Exp Examples2.my_ty loc
+sample_box_05 = UnBox {x=delay my_ty} sample_box_04
+
+-------------------------------------------
+-- END of boxing experiment
+-------------------------------------------
 
 i64 : {loc : _} -> Exp I64 loc
 i64 = MkI64 1
