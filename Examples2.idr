@@ -26,6 +26,12 @@ sample_box_04 = Box {x=delay my_ty} sample_box_03
 sample_box_05 : {r : _} -> {loc : Loc r _} -> Exp Examples2.my_ty loc
 sample_box_05 = UnBox {x=delay my_ty} sample_box_04
 
+sample_box_06 : {r : _} -> {loc : Loc r _} -> Exp Examples2.my_ty loc
+sample_box_06 = MkLeft $ MkRTup2 (MkI64 1) sample_box_04
+
+sample_box_07 : {r : _} -> {loc : Loc r _} -> Exp Examples2.my_ty loc
+sample_box_07 = MkLeft $ MkRTup2 (MkI64 2) $ Box {x=delay my_ty} sample_box_06
+
 -------------------------------------------
 -- END of boxing experiment
 -------------------------------------------
@@ -278,6 +284,11 @@ test_6 =
 
 partial main : IO ()
 main = do
+  --putStr !(toBufferDyn sample_box_03)
+  --putStr !(toBufferDyn sample_box_04)
+  --putStr !(toBufferDyn sample_box_05)
+  --putStr !(toBufferDyn sample_box_06)
+  putStr !(toBufferDyn sample_box_07)
   {-
   putStr !(toBufferDyn i64)
   putStr !(toBufferDyn sample_tup2_01)
@@ -305,4 +316,4 @@ main = do
   --putStr !(toBufferDyn sample_print_either_elim2)
   --putStr !(toBufferDyn sample_print_either_elim5_forward_ind) -- TODO
   --putStr !(toBufferDyn sample_print_either_elim5_backward_ind)
-  putStr !(compileProgram test_6)
+  --putStr !(compileProgram test_6)
