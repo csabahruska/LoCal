@@ -327,6 +327,23 @@ addStaticSizeEndWitness {t} l msg = do
   lift $ print $ colored BrightCyan " add endwitness to \{ew} for\n \{l}\n\n"
 
 partial fillDyn : {r : _ } -> {t : _ } -> {loc : Loc r t} -> Exp t loc -> M ()
+fillDyn (Box {i} v) = do
+  lift $ putStrLn " ++ Box \{elemToNat i}"
+  addCur !(genCursor loc) (getLoc v)
+  fillDyn v
+  updateEndWitnessTo loc v
+
+fillDyn (UnBox {i} v) = do
+  lift $ putStrLn " ++ UnBox \{elemToNat i}"
+  addCur !(genCursor loc) (getLoc v)
+  fillDyn v
+  updateEndWitnessTo loc v
+
+fillDyn MkT0 = do
+  lift $ putStrLn " ++ MkT0"
+  cur <- genCursor loc
+  addStaticSizeEndWitness loc "T0"
+
 fillDyn (MkI64 i) = do
   lift $ putStrLn " ++ MkI64 \{i}"
   cur <- genCursor loc
@@ -344,7 +361,7 @@ fillDyn (MkRTup2 a b) = do
   lift $ putStrLn " ++ MkRTup2"
   cur <- genCursor loc -- cursor for RTup2, which is: indirection-to-snd/fst-endwitness + fst + snd
   fillDyn a
-  when (isStaticSize (getTy a)) $ do
+  unless (isStaticSize (getTy a)) $ do
     emit "*(char**) \{cur} = \{!(getEndWitness $ getLoc a)};"
   fillDyn b
   updateEndWitnessTo loc b
