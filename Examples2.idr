@@ -308,6 +308,24 @@ test_8 =
       LetRegionValue r (PrintValue l) $ \i =>
       FunApp "printList" printList l
 
+test_9 : Program
+test_9 =
+  let printList : {r_in : _} -> {loc_in : Loc r_in _} -> {r_out : _} -> {loc_out : Loc r_out _} -> Exp Examples2.my_ty loc_in -> Exp T0 loc_out
+      printList a =
+        CaseEither a
+          (\l =>
+              PrjFst l $ \hd =>
+              PrjSnd l $ \tl =>
+              LetRegion $ \r =>
+              LetRegionValue r (PrintI64 hd) $ \t0 =>
+              FunApp "printList" printList $ UnBox {x=delay my_ty} tl
+          )
+          (\r => MkT0)
+  in Main $
+      LetRegion $ \r =>
+      LetRegionValue r sample_box_03 $ \l =>
+      FunApp "printList" printList l
+
 {-
   TODO:
     handle:
@@ -354,4 +372,4 @@ main = do
   --putStr !(toBufferDyn sample_print_either_elim2)
   --putStr !(toBufferDyn sample_print_either_elim5_forward_ind) -- TODO
   --putStr !(toBufferDyn sample_print_either_elim5_backward_ind)
-  putStr !(compileProgram test_8)
+  putStr !(compileProgram test_9)
