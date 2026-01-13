@@ -12,7 +12,7 @@ data Ty : Type where
   Ind : Ty -> Ty -- raw pointer ; no tag ; just the location data
   -- IDEA: Offset - region local ; Ptr - cross region
   -- recursive type support
-  BoxTy : {x : (Lazy Ty)} -> {xs : List (Lazy Ty)} -> Elem x xs -> Ty
+  Box : {x : (Lazy Ty)} -> {xs : List (Lazy Ty)} -> Elem x xs -> Ty
 
 {-
   INSIGHT:
@@ -51,8 +51,6 @@ data Loc : (r : Region) -> (t : Ty) -> Type where
           --    Q: what problem would it cause?
   LocAfterTag : String -> (t : Ty) -> Loc r t_prev -> Loc r t         -- statically known ; used for jump over the tag
   LocBoxCoerce : (t : Ty) -> Loc r t_prev -> Loc r t
-
-data Fun : (arg : Ty) -> (res : Ty) -> Type
 
 {-
   Q:
@@ -124,6 +122,7 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
 
   -- primops
   PrintI64 : {r_in : _} -> {loc_in : Loc r_in I64} -> Exp I64 loc_in -> Exp T0 loc
+  PrintValue : {r_in : _} -> {t : _} -> {loc_in : Loc r_in t} -> Exp t loc_in -> Exp T0 loc
 
   -- indirection
   MkInd : {loc_in : Loc r t} -> {loc_ind : Loc r (Ind t)} -> Exp t loc_in -> Exp (Ind t) loc_ind -- within the same region
@@ -133,8 +132,10 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
   DeRefLong : {r_in : _} -> {loc_in : Loc r_in t} -> Exp (Ind t) loc_ind -> Exp t loc_in      -- cross region
 
   -- boxing
-  Box   : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc : Loc r _} -> Exp x (LocBoxCoerce _ loc) -> Exp (BoxTy i) loc
-  UnBox : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc : Loc r _} -> Exp (BoxTy i) (LocBoxCoerce _ loc) -> Exp x loc
+  MkBox : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc : Loc r _} -> Exp x (LocBoxCoerce _ loc) -> Exp (Box i) loc
+  --UnBox : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc : Loc r _} -> Exp (Box i) (LocBoxCoerce _ loc) -> Exp x loc
+  UnBox : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc : Loc r _} -> Exp (Box i) (loc) -> Exp x (LocBoxCoerce _ loc)
+  --UnBox : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc2 : Loc r _} -> {loc : Loc r _} -> Exp (Box i) (loc2) -> Exp x loc
 
   -- to copy values cross region
   Copy : {r_in : _} -> {loc_in : Loc r_in t} -> Exp t loc_in -> Exp t loc
@@ -216,27 +217,17 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
                -- A: there is no problem because the location would be the same and the end witness will be different
                -- IDEAS: is the result size an Either Int Int?
 
-  FunApp : {r_in : _} -> {r_out : _} -> {loc_in : Loc r_in arg} -> {loc_out : Loc r_out res} -> Fun arg res -> Exp arg loc_in -> Exp res loc_out
   -- TODO: check the typing rules for function application in LoCal type system
-  FunApp2 : {r_in : _} -> {r_out : _} -> {t_arg : _} -> {loc_in : Loc r_in t_arg} -> {loc_out : Loc r_out res} ->
-            String ->
-            (Exp t_arg loc_in -> Exp res loc_out) -> Exp t_arg loc_in -> Exp res loc_out
+  FunApp : {r_in : _} -> {r_out : _} -> {t_arg : _} -> {loc_in : Loc r_in t_arg} -> {loc_out : Loc r_out res} ->
+           String ->
+           (Exp t_arg loc_in -> Exp res loc_out) -> Exp t_arg loc_in -> Exp res loc_out
 
   -- internal
   Var : {-{a : _} -> {r : _} -> {loc : Loc r a} ->-} Exp a loc
 
 public export
-data Fun : (arg : Ty) -> (res : Ty) -> Type where
-  MkFunId : Int -> Fun arg res
-
-public export
 data Program : Type where
-  Main2  : (Exp T0 (LocStart T0 (MkRegion (-1))) -> Exp res (LocStart res (MkRegion (-2)))) -> Program
-  Main3  : {res : Ty} -> Exp res (LocStart res (MkRegion (-1))) -> Program
-  Main  : (main : Fun T0 res) -> Program
-  MkDec : {- {arg : Ty} -> {res : Ty} -> -} (Fun arg res -> Program) -> Program
-  MkDef : {arg : Ty} -> {res : Ty}{- -> {r_in : _} -> {r_out : _}-} -> {loc_in : Loc r_in arg} -> {loc_out : Loc r_out res}
-          -> Fun arg res -> (Exp arg loc_in -> Exp res loc_out) -> Program -> Program
+  Main  : {res : Ty} -> Exp res (LocStart res (MkRegion (-1))) -> Program
 
 -- -------------------------------
 
