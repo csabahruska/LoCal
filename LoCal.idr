@@ -40,17 +40,16 @@ data Region : Type where
   MkRegion : Int -> Region
 
 public export
-data Loc : (r : Region) -> (t : Ty) -> Type where
-  LocStart    : (t : Ty) -> (r : Region) -> Loc r t
-  LocAfter    : (t : Ty) -> Loc r t_prev -> Loc r t   -- Q: dynamically/runtime known? maybe a better name is RuntimeAfter ; A: NO!
+data Loc : (r : Region) -> Type where
+  LocStart    : (t : Ty) -> (r : Region) -> Loc r
+  LocAfter    : (t : Ty) -> Loc r -> Loc r   -- Q: dynamically/runtime known? maybe a better name is RuntimeAfter ; A: NO!
                 -- INSIGHT: if we would put Ty to this (instead of static size that would provide enough information to generate runtime function to calculate an endwitness
                 -- IDEA: location is not the right thing that descibes the next location
                 --        instead it would be the end witness of some value!
                 --        location + size-witness = end-witness
           --    ^ this should be a value variable instead of Ty, that would solve the sizeof problem with either's left/right
           --    Q: what problem would it cause?
-  LocAfterTag : String -> (t : Ty) -> Loc r t_prev -> Loc r t         -- statically known ; used for jump over the tag
-  LocBoxCoerce : (t : Ty) -> Loc r t_prev -> Loc r t
+  LocAfterTag : String -> (t : Ty) -> Loc r -> Loc r         -- statically known ; used for jump over the tag
 
 {-
   Q:
@@ -106,7 +105,7 @@ data Loc : (r : Region) -> (t : Ty) -> Type where
 -}
 
 public export
-data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
+data Exp : (t : Ty) -> (loc : Loc r) -> Type where
 
   -- Q: when to introduce new regions?
   LetRegion : (Region -> Exp t loc) -> Exp t loc
@@ -118,35 +117,33 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
   -- Q: not needed? A: Not needed, use meta language let because every LoCal value istead, because every value resides only one location
   --LetSubValue : {loc_in : Loc r t_in} -> {loc : Loc r t} -> Exp t_in loc_in -> (Exp t_in loc_in -> Exp t loc) -> Exp t loc
 
-  LetRegionValue : {t : _} -> {a : _} -> {loc : Loc r a} -> (r : Region) -> Exp t (LocStart t r) -> (Exp t (LocStart t r) -> Exp a loc) -> Exp a loc
+  LetRegionValue : {t : _} -> {a : _} -> {loc : Loc r} -> (r : Region) -> Exp t (LocStart t r) -> (Exp t (LocStart t r) -> Exp a loc) -> Exp a loc
 
   -- primops
-  PrintI64 : {r_in : _} -> {loc_in : Loc r_in I64} -> Exp I64 loc_in -> Exp T0 loc
-  PrintValue : {r_in : _} -> {t : _} -> {loc_in : Loc r_in t} -> Exp t loc_in -> Exp T0 loc
+  PrintI64 : {r_in : _} -> {loc_in : Loc r_in} -> Exp I64 loc_in -> Exp T0 loc
+  PrintValue : {r_in : _} -> {t : _} -> {loc_in : Loc r_in} -> Exp t loc_in -> Exp T0 loc
 
   -- indirection
-  MkInd : {loc_in : Loc r t} -> {loc_ind : Loc r (Ind t)} -> Exp t loc_in -> Exp (Ind t) loc_ind -- within the same region
-  DeRef : {loc_in : Loc r t} -> {loc_ind : Loc r (Ind t)} -> Exp (Ind t) loc_ind -> Exp t loc_in -- within the same region
+  MkInd : {loc_in : Loc r} -> {loc_ind : Loc r} -> Exp t loc_in -> Exp (Ind t) loc_ind -- within the same region
+  DeRef : {loc_in : Loc r} -> {loc_ind : Loc r} -> Exp (Ind t) loc_ind -> Exp t loc_in -- within the same region
 
-  MkIndLong : {r_in : _} -> {loc_in : Loc r_in t} -> Exp t loc_in -> Exp (Ind t) loc_ind      -- cross region
-  DeRefLong : {r_in : _} -> {loc_in : Loc r_in t} -> Exp (Ind t) loc_ind -> Exp t loc_in      -- cross region
+  MkIndLong : {r_in : _} -> {loc_in : Loc r_in} -> Exp t loc_in -> Exp (Ind t) loc_ind      -- cross region
+  DeRefLong : {r_in : _} -> {loc_in : Loc r_in} -> Exp (Ind t) loc_ind -> Exp t loc_in      -- cross region
 
   -- boxing
-  MkBox : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc : Loc r _} -> Exp x (LocBoxCoerce _ loc) -> Exp (Box i) loc
-  --UnBox : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc : Loc r _} -> Exp (Box i) (LocBoxCoerce _ loc) -> Exp x loc
-  UnBox : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc : Loc r _} -> Exp (Box i) (loc) -> Exp x (LocBoxCoerce _ loc)
-  --UnBox : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc2 : Loc r _} -> {loc : Loc r _} -> Exp (Box i) (loc2) -> Exp x loc
+  MkBox : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc : Loc r} -> Exp x loc -> Exp (Box i) loc
+  UnBox : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc : Loc r} -> Exp (Box i) loc -> Exp x loc
 
   -- to copy values cross region
-  Copy : {r_in : _} -> {loc_in : Loc r_in t} -> Exp t loc_in -> Exp t loc
+  Copy : {r_in : _} -> {loc_in : Loc r_in} -> Exp t loc_in -> Exp t loc
 
   -- primitive values
   MkT0 : Exp T0 loc
   MkI64 : Int -> Exp I64 loc
 
   -- I64 primops
-  AddI64 : {r_in : _} -> {r_in2 : _} -> {loc_in : Loc r_in I64} -> {loc_in2 : Loc r_in2 I64} -> Exp I64 loc_in -> Exp I64 loc_in2 -> Exp I64 loc
-  EqI64  : {r_in : _} -> {r_in2 : _} -> {loc_in : Loc r_in I64} -> {loc_in2 : Loc r_in2 I64} -> Exp I64 loc_in -> Exp I64 loc_in2 -> Exp (Either T0 T0) loc
+  AddI64 : {r_in : _} -> {r_in2 : _} -> {loc_in : Loc r_in} -> {loc_in2 : Loc r_in2} -> Exp I64 loc_in -> Exp I64 loc_in2 -> Exp I64 loc
+  EqI64  : {r_in : _} -> {r_in2 : _} -> {loc_in : Loc r_in} -> {loc_in2 : Loc r_in2} -> Exp I64 loc_in -> Exp I64 loc_in2 -> Exp (Either T0 T0) loc
 
   -- value shapes, ADT can be modeled with these
   {-
@@ -156,21 +153,21 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
       - the Exp size could be used to define the region size also
   -}
 
-  MkSTup2 : {a, b : Ty} -> {loc : Loc r _} ->
+  MkSTup2 : {a, b : Ty} -> {loc : Loc r} ->
     let locFst = LocAfterTag "STup2" a loc in
     let locSnd = LocAfter b locFst in
     Exp a locFst -> Exp b locSnd -> Exp (STup2 a b) loc
 
-  MkRTup2 : {a, b : Ty} -> {loc : Loc r _} ->
+  MkRTup2 : {a, b : Ty} -> {loc : Loc r} ->
     let locFst = LocAfterTag "RTup2" a loc in
     let locSnd = LocAfter b locFst in
     Exp a locFst -> Exp b locSnd -> Exp (RTup2 a b) loc
 
-  MkLeft  : {a, b : Ty} -> {loc : Loc r _} ->
+  MkLeft  : {a, b : Ty} -> {loc : Loc r} ->
     let locArg = LocAfterTag "Left" a loc in
     Exp a locArg -> Exp (Either a b) loc
 
-  MkRight : {a, b : Ty} -> {loc : Loc r _} ->
+  MkRight : {a, b : Ty} -> {loc : Loc r} ->
     let locArg = LocAfterTag "Right" b loc in
     Exp b locArg -> Exp (Either a b) loc
 
@@ -180,11 +177,11 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
     INSIGHT: sharing poisons code, because requires interpretation
 -}
   -- random access tup2
-  PrjFst : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup _} -> {loc_out : Loc r_out _} -> Exp (RTup2 a b) loc_tup ->
+  PrjFst : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup} -> {loc_out : Loc r_out} -> Exp (RTup2 a b) loc_tup ->
             let locFst = LocAfterTag "RTup2" a loc_tup in
             (Exp a locFst -> Exp c loc_out) -> Exp c loc_out
 
-  PrjSnd : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup _} -> {loc_out : Loc r_out _} -> Exp (RTup2 a b) loc_tup ->
+  PrjSnd : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup} -> {loc_out : Loc r_out} -> Exp (RTup2 a b) loc_tup ->
             let locFst = LocAfterTag "RTup2" a loc_tup in
             let locSnd = LocAfter b locFst in
             (Exp b locSnd -> Exp c loc_out) -> Exp c loc_out
@@ -197,7 +194,7 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
               let locSnd = LocAfter b locFst in
               (Exp a locFst -> Exp c loc_out1) -> (Exp b locSnd -> Exp c loc_out1 -> Exp d loc_out2) -> Exp d loc_out2
   -}
-  CaseSTup2 : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r _} -> {loc_out : Loc r_out _} -> Exp (STup2 a b) loc_tup ->
+  CaseSTup2 : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r} -> {loc_out : Loc r_out} -> Exp (STup2 a b) loc_tup ->
               let locFst = LocAfterTag "STup2" a loc_tup in
               let locSnd = LocAfter b locFst in
               (Exp a locFst -> Exp b locSnd -> Exp c loc_out) -> Exp c loc_out
@@ -209,7 +206,7 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
       + can genetrate end-witness producing runtime function at compile time    ; runtime      = end-witness function : value -> end-witness
 -}
 
-  CaseEither : {r : _} -> {a, b, c : Ty} -> {scrut_loc : Loc r _} -> {loc_out : Loc r_out _} -> Exp (Either a b) scrut_loc ->
+  CaseEither : {r : _} -> {a, b, c : Ty} -> {scrut_loc : Loc r} -> {loc_out : Loc r_out} -> Exp (Either a b) scrut_loc ->
                let locL = LocAfterTag "Left" a scrut_loc in
                let locR = LocAfterTag "Right" b scrut_loc in
                (Exp a locL -> Exp c loc_out) -> (Exp b locR -> Exp c loc_out) -> Exp c loc_out
@@ -218,7 +215,7 @@ data Exp : (t : Ty) -> (loc : Loc r t) -> Type where
                -- IDEAS: is the result size an Either Int Int?
 
   -- TODO: check the typing rules for function application in LoCal type system
-  FunApp : {r_in : _} -> {r_out : _} -> {t_arg : _} -> {loc_in : Loc r_in t_arg} -> {loc_out : Loc r_out res} ->
+  FunApp : {r_in : _} -> {r_out : _} -> {t_arg : _} -> {loc_in : Loc r_in} -> {loc_out : Loc r_out} ->
            String ->
            (Exp t_arg loc_in -> Exp res loc_out) -> Exp t_arg loc_in -> Exp res loc_out
 

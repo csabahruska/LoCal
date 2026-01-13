@@ -50,15 +50,14 @@ showTy t = case t of
 Show Ty where show = showTy
 Interpolation Ty where interpolate = show
 
-showLoc : Loc r t -> String
+showLoc : Loc r -> String
 showLoc loc = case loc of
   LocStart t r => "LocStart (\{show t}) (\{show r})"
   LocAfter t l => "LocAfter (\{show t})\n (\{showLoc l})"
   LocAfterTag s t l => "LocAfterTag \{s} (\{show t})\n (\{showLoc l})"
-  LocBoxCoerce t l => "LocBoxCoerce (\{show t})\n (\{showLoc l})"
 
-Show (Loc r t) where show = showLoc
-Interpolation (Loc r t) where interpolate = show
+Show (Loc r) where show = showLoc
+Interpolation (Loc r) where interpolate = show
 
 {-
   TODO:
@@ -109,13 +108,12 @@ mkRevLoc loc = case loc of
   LocAfter _ l => mkRevLoc l ++ [MkLocItem loc]
   LocAfterTag _ _ l => mkRevLoc l ++ [MkLocItem loc]
 -}
-getLocTy : Loc r t -> Ty
+getLocTy : Loc r -> Ty
 getLocTy (LocStart t _) = t
 getLocTy (LocAfter t _) = t
 getLocTy (LocAfterTag _ t _) = t
-getLocTy (LocBoxCoerce t _) = t
 
-getLocRegion : {r : _} -> Loc r t -> Region
+getLocRegion : {r : _} -> Loc r -> Region
 getLocRegion {r} _ = r
 
 isStaticSize : Ty -> Bool
@@ -125,7 +123,7 @@ getRTupTagSize : Ty -> Int
 getRTupTagSize fstTy = if isStaticSize fstTy then 0 else 8 -- no indirection to snd is needed when the static size of fst is known
 
 -- TODO: return: relative base value and static offset, and the required runtime end witnesses
-getStaticIndex : Loc r t -> Maybe Int
+getStaticIndex : Loc r -> Maybe Int
 getStaticIndex = \case
   LocStart _ _ => Just 0
   LocAfter _ l => do
@@ -140,7 +138,6 @@ getStaticIndex = \case
   LocAfterTag _ _ l => do
     i <- getStaticIndex l
     Just (1 + i)
-  LocBoxCoerce t l => Nothing -- TODO
 
 -- codegen monad
 
@@ -156,6 +153,7 @@ record CG where
   constructor MkCG
   -- global
   counter     : Int
+  decls       : List String
   code        : SortedMap String (List String)
   local       : CGLocal
 
@@ -171,6 +169,7 @@ emptyCGLocal = MkCGLocal
 emptyCG : CG
 emptyCG = MkCG
   { counter     = 0
+  , decls       = []
   , code        = empty
   , local       = emptyCGLocal
   }
@@ -211,6 +210,11 @@ emit s = do
   lift $ putStrLn "[\{cg.local.funName}] \{s}"
   modify {code $= insertWith (++) cg.local.funName [indent (cg.local.indentLevel * 2) s]}
 
+emitDecl : String -> M ()
+emitDecl s = do
+  cg <- get
+  lift $ putStrLn "[\{cg.local.funName}] \{s}"
+  modify {decls $= (::) s}
 
 genFunction : String -> M a -> M a
 genFunction fun_name action = do
@@ -225,26 +229,26 @@ genFunction fun_name action = do
 isNewFunction : String -> M Bool
 isNewFunction funName = pure $ isNothing (lookup funName !(gets code))
 
-getTy : {t : _} -> {0 l : Loc r t} -> (Exp t l) -> Ty
+getTy : {t : _} -> {0 l : Loc r} -> (Exp t l) -> Ty
 getTy {t} _ = t
 
-getLoc : {t : _} -> {l : Loc r t} -> (Exp t l) -> Loc r t
+getLoc : {t : _} -> {l : Loc r} -> (Exp t l) -> Loc r
 getLoc {l} _ = l
 
-addCur : String -> Loc r t -> M ()
+addCur : String -> Loc r -> M ()
 addCur c l = modify {local.locations $= insert (show l) c}
 
-addEndWitness : String -> Loc r t -> M ()
+addEndWitness : String -> Loc r -> M ()
 addEndWitness c l = modify {local.endwitness $= insert (show l) c}
 
 -- effect handling
-addEffect : (loc : Loc r t) -> Effect -> M ()
+addEffect : (loc : Loc r) -> Effect -> M ()
 addEffect _ _ = pure () -- TODO
 
-reqEffect : (loc : Loc r t) -> Effect -> M ()
+reqEffect : (loc : Loc r) -> Effect -> M ()
 reqEffect _ _ = pure () -- TODO
 
-getEffect : (loc : Loc r t) -> M (SortedSet Effect)
+getEffect : (loc : Loc r) -> M (SortedSet Effect)
 getEffect loc = do
   effs <- gets (.local.effects)
   let Just eff = lookup (show loc) effs
@@ -254,14 +258,14 @@ getEffect loc = do
 
 -- IDEA: use Loc values in Map as keys via its show function
 
-getEndWitness : (loc : Loc r t) -> M String
+getEndWitness : (loc : Loc r) -> M String
 getEndWitness loc = do
   ends <- gets (.local.endwitness)
   let Just ew = lookup (show loc) ends
         | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc endwitness for \{loc}\n endwitness map: \{show ends}"
   pure ew
 
-getCursor : (loc : Loc r t) -> M String
+getCursor : (loc : Loc r) -> M String
 getCursor loc = do
   locs <- gets (.local.locations)
   let Just cur = lookup (show loc) locs
@@ -269,7 +273,7 @@ getCursor loc = do
   pure cur
 
 -- TODO: check that it is written only once ; use an effect map for LocVals
-genCursor : {r :_ } -> (loc : Loc r t) -> M String
+genCursor : {r :_ } -> (loc : Loc r) -> M String
 genCursor {r} loc = do
   --lift $ putStrLn " !! gen cursor for \{loc}"
   let locKey = show loc
@@ -303,24 +307,24 @@ genCursor {r} loc = do
           c <- newCur
           emit "char* \{c} = \{!(getCursor l)} + \{tagSize}; // STATIC INDEX \{show (getStaticIndex loc)} in \{show (getLocRegion loc)}"
           pure c
-        LocBoxCoerce _ l => genCursor l
 
-defineEndWitness : (loc : Loc r t) -> String -> M ()
+defineEndWitness : (loc : Loc r) -> String -> M ()
 defineEndWitness loc value = do
   cur <- getCursor loc
   let ew = "\{cur}_end"
   modify {local.endwitness $= insert (show loc) ew}
   emit "char* \{ew} = \{value};"
 
-updateEndWitnessTo : {loc2 : _} -> (loc : Loc r t) -> Exp _ loc2 -> M ()
+updateEndWitnessTo : {loc2 : _} -> (loc : Loc r) -> Exp _ loc2 -> M ()
 updateEndWitnessTo {loc2} loc e = do
   ew <- getEndWitness loc2
   modify {local.endwitness $= insert (show loc) ew}
   lift $ print $ colored BrightBlue " update endwitness to \{ew} for\n \{loc}\n\n"
 
-addStaticSizeEndWitness : {t : _} -> (loc : Loc r t) -> String -> M ()
-addStaticSizeEndWitness {t} l msg = do
-  let Just bytes = getStaticSize t
+addStaticSizeEndWitness : (loc : Loc r) -> String -> M ()
+addStaticSizeEndWitness l msg = do
+  let t = getLocTy l
+      Just bytes = getStaticSize t
         | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing statis size for: \{l}"
   cur <- getCursor l
   let ew = "\{cur}_end"
@@ -328,7 +332,8 @@ addStaticSizeEndWitness {t} l msg = do
   emit "char* \{ew} = \{cur} + \{bytes}; // \{msg}"
   lift $ print $ colored BrightCyan " add endwitness to \{ew} for\n \{l}\n\n"
 
-partial fillDyn : {r : _ } -> {t : _ } -> {loc : Loc r t} -> Exp t loc -> M ()
+partial fillDyn : {r : _ } -> {t : _ } -> {loc : Loc r} -> Exp t loc -> M ()
+
 fillDyn (MkBox {i} v) = do
   lift $ putStrLn " ++ MkBox \{elemToNat i}"
   addCur !(genCursor loc) (getLoc v)
@@ -521,6 +526,7 @@ fillDyn (LetRegionValue {a,t} r v cont) = do
 {-
 fillDyn (Let {r_in} {loc_in} a cont) = fillDyn {r=r_in} {loc=loc_in} a >> fillDyn (cont a)
 -}
+
 fillDyn (CaseEither {scrut_loc} scrut cont_left cont_right) = do
   lift $ putStrLn " ++ CaseEither"
   fillDyn scrut
@@ -573,6 +579,7 @@ fillDyn (FunApp {loc_in} fun_name fun arg) = do
       addCur cur_arg loc_in
       cur_out <- newCursorName
       addCur cur_out loc
+      emitDecl "char* \{fun_name}(char* \{cur_arg}, char* \{cur_out});"
       emit "char* \{fun_name}(char* \{cur_arg}, char* \{cur_out}) {"
       indent $ do
         fillDyn (fun Var)
@@ -613,7 +620,7 @@ toBufferDyn {t} e = do
       indent $ fillDyn $ LetRegionValue (MkRegion (-1)) e id
       emit "}"
   putStrLn " ---- CODE OUTPUT ----"
-  pure $ unlines $ c_header :: [unlines (reverse funLines) | funLines <- values s.code]
+  pure $ unlines $ c_header :: [unlines (reverse funLines) | funLines <- s.decls :: values s.code]
 
 partial public export
 compileProgram : Program -> IO String

@@ -20,16 +20,16 @@ mutual
 sample_box_03 : {loc : _} -> Exp Examples2.my_ty loc
 sample_box_03 = MkRight MkT0
 
-sample_box_04 : {r : _} -> {loc : Loc r _} -> Exp Examples2.my_ty_box loc
+sample_box_04 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty_box loc
 sample_box_04 = MkBox {x=delay my_ty} sample_box_03
 
---sample_box_05 : {r : _} -> {loc : Loc r _} -> Exp Examples2.my_ty loc
---sample_box_05 = UnBox {x=delay my_ty} sample_box_04
+sample_box_05 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc
+sample_box_05 = UnBox {x=delay my_ty} sample_box_04
 
-sample_box_06 : {r : _} -> {loc : Loc r _} -> Exp Examples2.my_ty loc
+sample_box_06 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc
 sample_box_06 = MkLeft $ MkRTup2 (MkI64 1) sample_box_04
 
-sample_box_07 : {r : _} -> {loc : Loc r _} -> Exp Examples2.my_ty loc
+sample_box_07 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc
 sample_box_07 = MkLeft $ MkRTup2 (MkI64 2) $ MkBox {x=delay my_ty} sample_box_06
 
 -------------------------------------------
@@ -195,7 +195,7 @@ test_4 =
 
 test_5 : Program
 test_5 =
-  let myPrint : {r_in : _} -> {loc_in : Loc r_in _} -> Exp I64 loc_in -> Exp T0 loc_out
+  let myPrint : {r_in : _} -> {loc_in : Loc r_in} -> Exp I64 loc_in -> Exp T0 loc_out
       myPrint i = PrintI64 i
   in Main $
           LetRegion $ \r =>
@@ -224,7 +224,7 @@ test_5 =
 
 test_6 : Program
 test_6 =
-  let genList : {r_in : _} -> {loc_in : Loc r_in _} -> {r_out : _} -> {loc_out : Loc r_out _} -> Exp I64 loc_in -> Exp I64 loc_out
+  let genList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp I64 loc_in -> Exp I64 loc_out
       genList i =
         LetRegion $ \r =>
         LetRegionValue r (MkI64 10) $ \ten =>
@@ -248,7 +248,7 @@ test_6 =
 
 test_7 : Program
 test_7 =
-  let genList : {r_in : _} -> {loc_in : Loc r_in _} -> {r_out : _} -> {loc_out : Loc r_out _} -> Exp I64 loc_in -> Exp Examples2.my_ty loc_out
+  let genList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp I64 loc_in -> Exp Examples2.my_ty loc_out
       genList i =
         LetRegion $ \r =>
         LetRegionValue r (MkI64 10) $ \ten =>
@@ -272,7 +272,7 @@ test_7 =
 
 test_8 : Program
 test_8 =
-  let genList : {r_in : _} -> {loc_in : Loc r_in _} -> {r_out : _} -> {loc_out : Loc r_out _} -> Exp I64 loc_in -> Exp Examples2.my_ty loc_out
+  let genList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp I64 loc_in -> Exp Examples2.my_ty loc_out
       genList i =
         LetRegion $ \r =>
         LetRegionValue r (MkI64 10) $ \ten =>
@@ -288,7 +288,7 @@ test_8 =
           )
           (\t => MkRight MkT0)
 
-      printList : {r_in : _} -> {loc_in : Loc r_in _} -> {r_out : _} -> {loc_out : Loc r_out _} -> Exp Examples2.my_ty loc_in -> Exp T0 loc_out
+      printList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.my_ty loc_in -> Exp T0 loc_out
       printList a =
         CaseEither a
           (\l =>
@@ -310,7 +310,7 @@ test_8 =
 
 test_9 : Program
 test_9 =
-  let printList : {r_in : _} -> {loc_in : Loc r_in _} -> {r_out : _} -> {loc_out : Loc r_out _} -> Exp Examples2.my_ty loc_in -> Exp T0 loc_out
+  let printList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.my_ty loc_in -> Exp T0 loc_out
       printList a =
         CaseEither a
           (\l =>
@@ -323,7 +323,7 @@ test_9 =
           (\r => MkT0)
   in Main $
       LetRegion $ \r =>
-      LetRegionValue r sample_box_03 $ \l =>
+      LetRegionValue r sample_box_07 $ \l =>
       FunApp "printList" printList l
 
 {-
@@ -373,3 +373,15 @@ main = do
   --putStr !(toBufferDyn sample_print_either_elim5_forward_ind) -- TODO
   --putStr !(toBufferDyn sample_print_either_elim5_backward_ind)
   putStr !(compileProgram test_9)
+{-
+TODO:
+  list:
+    map (+1) list
+    filter
+    sum
+    append
+
+  tree
+    build
+    sum
+-}
