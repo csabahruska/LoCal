@@ -1,7 +1,6 @@
 module Dynamic
 
 import LoCal
---import Instances
 import Data.List.Elem
 import Data.Maybe
 import Data.SortedMap
@@ -46,7 +45,7 @@ showTy t = case t of
   Either a b  => "Either (\{showTy a}) (\{showTy b})"
   I64         => "I64"
   Ind a       => "Ind (\{showTy a})"
-  BoxTy i     => "BoxTy \{elemToNat i}"
+  Box i       => "Box \{elemToNat i}"
 
 Show Ty where show = showTy
 Interpolation Ty where interpolate = show
@@ -95,7 +94,7 @@ getStaticSize = \case
     if sa == sb -- special case, when the left and right size matches and statically known
       then Just (1 + sa)
       else Nothing
-  BoxTy _ => Nothing
+  Box _ => Nothing
 
 {-
 data LocItem : Type where
@@ -141,7 +140,7 @@ getStaticIndex = \case
   LocAfterTag _ _ l => do
     i <- getStaticIndex l
     Just (1 + i)
-  LocBoxCoerce _ _ => Nothing
+  LocBoxCoerce t l => Nothing -- TODO
 
 -- codegen monad
 
@@ -235,6 +234,9 @@ getLoc {l} _ = l
 addCur : String -> Loc r t -> M ()
 addCur c l = modify {local.locations $= insert (show l) c}
 
+addEndWitness : String -> Loc r t -> M ()
+addEndWitness c l = modify {local.endwitness $= insert (show l) c}
+
 -- effect handling
 addEffect : (loc : Loc r t) -> Effect -> M ()
 addEffect _ _ = pure () -- TODO
@@ -327,17 +329,43 @@ addStaticSizeEndWitness {t} l msg = do
   lift $ print $ colored BrightCyan " add endwitness to \{ew} for\n \{l}\n\n"
 
 partial fillDyn : {r : _ } -> {t : _ } -> {loc : Loc r t} -> Exp t loc -> M ()
-fillDyn (Box {i} v) = do
-  lift $ putStrLn " ++ Box \{elemToNat i}"
+fillDyn (MkBox {i} v) = do
+  lift $ putStrLn " ++ MkBox \{elemToNat i}"
   addCur !(genCursor loc) (getLoc v)
   fillDyn v
   updateEndWitnessTo loc v
 
-fillDyn (UnBox {i} v) = do
+{-
+[printList] char* cur11 = cur8_end; // STATIC INDEX Just 2 in MkRegion 1
+[printList] // Var Box 0
+ERROR: INTERNAL ERROR: missing loc endwitness for
+ LocAfter (Box 0)
+ (LocAfterTag RTup2 (I64)
+ (LocAfterTag Left (RTup2 (I64) (Box 0))
+ (LocStart (Either (RTup2 (I64) (Box 0)) (T0)) (MkRegion 1))))
+ endwitness map: fromList [
+ ("LocAfterTag RTup2 (I64)\n
+   (LocAfterTag Left (RTup2 (I64) (Box 0))\n
+   (LocStart (Either (RTup2 (I64) (Box 0)) (T0)) (MkRegion 1)))", "cur8_end"
+ ),
+ ("LocStart (Either (RTup2 (I64) (Box 0)) (T0)) (MkRegion 1)", "cur4_end")
+ ,
+ ("LocStart (T0) (MkRegion 9)", "cur10_end")
+ ]
+
+-}
+
+fillDyn (UnBox {i} {x} v) = do
   lift $ putStrLn " ++ UnBox \{elemToNat i}"
-  addCur !(genCursor loc) (getLoc v)
   fillDyn v
-  updateEndWitnessTo loc v
+  let l = loc
+  lift $ putStrLn " ++ UnBox - \{l}"
+  cur_l <- genCursor l
+  --addCur cur_l (getLoc v)
+  lift $ putStrLn " ++ UnBox \{elemToNat i} - A"
+  lift $ putStrLn " ++ UnBox \{elemToNat i} - B"
+  --updateEndWitnessTo loc v
+  lift $ putStrLn " ++ UnBox \{elemToNat i} - C"
 
 fillDyn MkT0 = do
   lift $ putStrLn " ++ MkT0"
@@ -407,19 +435,31 @@ fillDyn (MkRight b) = do
   emit "*(char*) \{cur} = 1; // RIGHT_TAG"
   fillDyn b
   updateEndWitnessTo loc b
-
+-- TODO: implement effect tracking and cursor and end-witness generation
+-- Q: should we get rid off LocBoxCorcion with removing Ty from Loc type?
+--    maybe i should try this out in a branch?
+--    what would i lose if only Exp would track types and not locations?
 fillDyn (PrjFst a cont) = do
   lift $ putStrLn " ++ PrjFst"
   fillDyn a
   fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
   -- Q: is endwintness needed for fst?
 fillDyn (PrjSnd {a, loc_tup} tup cont) = do
-  lift $ putStrLn " ++ PrjSnd"
+  lift $ putStrLn " ++ PrjSnd1"
   fillDyn tup
   let locFst = LocAfterTag "RTup2" a loc_tup
+  lift $ putStrLn " ++ PrjSnd2 \{locFst}"
+  _ <- genCursor loc
+  _ <- genCursor loc_tup
+  _ <- genCursor locFst
+  --updateEndWitnessTo loc tup
   case getStaticSize a of
-    Just _  => addStaticSizeEndWitness locFst "static index for RTup2Snd"
-    Nothing => defineEndWitness locFst "*(char**)\{!(getCursor loc)}; // get Snd cursor from RTup2" -- get random access pointer to snd
+    Just _  => do
+      lift $ putStrLn " getStaticSize - true"
+      addStaticSizeEndWitness locFst "static index for RTup2Snd"
+    Nothing => do
+      lift $ putStrLn " getStaticSize - false"
+      defineEndWitness locFst "*(char**)\{!(getCursor loc)}; // get Snd cursor from RTup2" -- get random access pointer to snd
   fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
   -- Q: is endwintness needed for snd?
 
@@ -454,6 +494,15 @@ fillDyn (PrintI64 {loc_in} a) = do
   addStaticSizeEndWitness loc "T0"
   cur_in <- getCursor loc_in
   emit "printf(\"%ld\\n\", *(int*) \{cur_in});"
+
+fillDyn (PrintValue {loc_in} a) = do
+  lift $ putStrLn " ++ PrintValue"
+  fillDyn a
+  cur <- genCursor loc
+  addStaticSizeEndWitness loc "T0"
+  cur_in <- getCursor loc_in
+  cur_end <- getEndWitness loc_in
+  emit "print_hex(\{cur_in}, \{cur_end} - \{cur_in});"
 
 fillDyn (LetRegion cont) = do
   lift $ putStrLn " ++ LetRegion"
@@ -502,17 +551,24 @@ fillDyn (Copy {r_in, loc_in} _) = do
 
 fillDyn Var = emit "// Var \{t}" -- assert_total $ idris_crash $ "Var"
 
-fillDyn (FunApp2 {loc_in} fun_name fun arg) = do
-  lift $ putStrLn " ++ FunApp2 \{fun_name}"
+fillDyn (FunApp {loc_in} fun_name fun arg) = do
+  lift $ putStrLn " ++ FunApp \{fun_name}"
   fillDyn arg
   cur_out <- genCursor loc
   cur_in <- getCursor loc_in
+  -- HINT: fun may or may not need arg end witness
+  --    Q: how to handle this?
+  --cur_in_end <- getEndWitness loc_in
+
   -- TODO: omit end-witness for static sized outputs
   -- TODO: addStaticSizeEndWitness loc "T0"
   defineEndWitness loc "\{fun_name}(\{cur_in}, \{cur_out})"
   -- codegen function if needed
   when !(isNewFunction fun_name) $ do
     genFunction fun_name $ do
+      -- done -  pass argument end witness; or figure out how to handle that
+      -- TODO: special case static sized arguments for end witness passing?
+      -- TODO: support multi parameter functions
       cur_arg <- newCursorName
       addCur cur_arg loc_in
       cur_out <- newCursorName
@@ -533,6 +589,17 @@ c_header = """
     return malloc(1024);
   }
 
+  void print_hex(const unsigned char *buf, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        // %02x: 0-padded, 2-character minimum, lowercase hex
+        printf("%02x ", buf[i]);
+
+        // Optional: add a newline every 16 bytes for readability
+        if ((i + 1) % 16 == 0) printf("\\n");
+    }
+    printf("\\n");
+  }
+
   """
 
 partial public export
@@ -550,8 +617,7 @@ toBufferDyn {t} e = do
 
 partial public export
 compileProgram : Program -> IO String
-compileProgram (Main3 e) = toBufferDyn e
---  Main3  : {res : Ty} -> Exp res (LocStart res (MkRegion (-4))) -> Program
+compileProgram (Main e) = toBufferDyn e
 
 {-
   INSIGHTS:
@@ -639,4 +705,5 @@ compileProgram (Main3 e) = toBufferDyn e
       + no locations
       + implicit sharing support
       + translate to LoCal
+    - think about how end-witnesses are created with reading data
 -}
