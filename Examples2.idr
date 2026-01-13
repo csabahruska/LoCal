@@ -15,22 +15,22 @@ mutual
   my_ty = Either (RTup2 I64 my_ty_box) T0
 
   my_ty_box : Ty
-  my_ty_box = BoxTy {x=my_ty} {xs=[my_ty]} Here
+  my_ty_box = Box {x=my_ty} {xs=[my_ty]} Here
 
 sample_box_03 : {loc : _} -> Exp Examples2.my_ty loc
 sample_box_03 = MkRight MkT0
 
 sample_box_04 : {r : _} -> {loc : Loc r _} -> Exp Examples2.my_ty_box loc
-sample_box_04 = Box {x=delay my_ty} sample_box_03
+sample_box_04 = MkBox {x=delay my_ty} sample_box_03
 
-sample_box_05 : {r : _} -> {loc : Loc r _} -> Exp Examples2.my_ty loc
-sample_box_05 = UnBox {x=delay my_ty} sample_box_04
+--sample_box_05 : {r : _} -> {loc : Loc r _} -> Exp Examples2.my_ty loc
+--sample_box_05 = UnBox {x=delay my_ty} sample_box_04
 
 sample_box_06 : {r : _} -> {loc : Loc r _} -> Exp Examples2.my_ty loc
 sample_box_06 = MkLeft $ MkRTup2 (MkI64 1) sample_box_04
 
 sample_box_07 : {r : _} -> {loc : Loc r _} -> Exp Examples2.my_ty loc
-sample_box_07 = MkLeft $ MkRTup2 (MkI64 2) $ Box {x=delay my_ty} sample_box_06
+sample_box_07 = MkLeft $ MkRTup2 (MkI64 2) $ MkBox {x=delay my_ty} sample_box_06
 
 -------------------------------------------
 -- END of boxing experiment
@@ -163,48 +163,24 @@ sample_print_either_elim5_backward_ind =
   let i1 = MkI64 44 in
   MkRTup2 (MkRTup2 i1 v1) (MkInd i1)
 
-test_ : Program
-test_ =
-  --MkDec $ \myFun1 =>
-  MkDec $ \mainFun =>
-  --MkDef {arg = I64} myFun1 (\a => PrintI64 a) $
-  -- (LocStart t (MkRegion (-1)))
-  MkDef
-    { loc_in  = LocStart _ (MkRegion (-1))
-    , loc_out = LocStart _ (MkRegion (-2))
---    , arg     = T0
---    , res     = T0
---    , r_in    = MkRegion (-1)
---    , r_out   = MkRegion (-2)
-    } mainFun
-    (
-      \a => LetRegion $ \r =>
-            LetRegionValue r (MkI64 123) $ \e1 =>
-            --FunApp myFun1 e1
-            PrintI64 e1
-    ) $
-  Main mainFun
-
 test_1 : Program
 test_1 =
-  let mainFun : {loc_in : _} -> {loc_out : _} -> Exp T0 loc_in -> Exp T0 loc_out
-      mainFun _ =
+  let mainFun : {loc_out : _} -> Exp T0 loc_out
+      mainFun =
             LetRegion $ \r =>
             LetRegionValue r (MkI64 123) $ \e1 =>
-            --FunApp myFun1 e1
             PrintI64 e1
-  in Main2 mainFun
+  in Main mainFun
 
 test_2 : Program
 test_2 =
-  Main2 $ \a =>
-            LetRegion $ \r =>
-            LetRegionValue r (MkI64 123) $ \e1 =>
-            PrintI64 e1
+  Main $ LetRegion $ \r =>
+         LetRegionValue r (MkI64 123) $ \e1 =>
+         PrintI64 e1
 
 test_3 : Program
 test_3 =
-  Main3 $ LetRegion $ \r =>
+  Main $ LetRegion $ \r =>
           LetRegionValue r (MkI64 123) $ \e1 =>
           PrintI64 e1
 
@@ -215,16 +191,16 @@ test_4 =
           LetRegion $ \r =>
           LetRegionValue r (MkI64 123) $ \e1 =>
           PrintI64 e1
-  in Main3 mainExp
+  in Main mainExp
 
 test_5 : Program
 test_5 =
   let myPrint : {r_in : _} -> {loc_in : Loc r_in _} -> Exp I64 loc_in -> Exp T0 loc_out
       myPrint i = PrintI64 i
-  in Main3 $
+  in Main $
           LetRegion $ \r =>
           LetRegionValue r (MkI64 123) $ \i =>
-          FunApp2 "myPrint" myPrint i
+          FunApp "myPrint" myPrint i
 
 {-
   TODO:
@@ -260,22 +236,84 @@ test_6 =
               LetRegionValue r (MkI64 1) $ \one =>
               LetRegion $ \r =>
               LetRegionValue r (AddI64 one i) $ \next =>
-              FunApp2 "genList" genList next
+              FunApp "genList" genList next
           )
           (\t => Copy ten)
-  in Main3 $
+  in Main $
       LetRegion $ \r =>
       LetRegionValue r (MkI64 1) $ \i =>
       LetRegion $ \r =>
-      LetRegionValue r (FunApp2 "genList" genList i) $ \i =>
+      LetRegionValue r (FunApp "genList" genList i) $ \i =>
       PrintI64 i
+
+test_7 : Program
+test_7 =
+  let genList : {r_in : _} -> {loc_in : Loc r_in _} -> {r_out : _} -> {loc_out : Loc r_out _} -> Exp I64 loc_in -> Exp Examples2.my_ty loc_out
+      genList i =
+        LetRegion $ \r =>
+        LetRegionValue r (MkI64 10) $ \ten =>
+        LetRegion $ \r =>
+        LetRegionValue r (EqI64 ten i) $ \b =>
+        CaseEither b
+          (\f =>
+              LetRegion $ \r =>
+              LetRegionValue r (MkI64 1) $ \one =>
+              LetRegion $ \r =>
+              LetRegionValue r (AddI64 one i) $ \next =>
+              MkLeft $ MkRTup2 (Copy i) $ MkBox {x=delay my_ty} $ FunApp "genList" genList next
+          )
+          (\t => MkRight MkT0)
+  in Main $
+      LetRegion $ \r =>
+      LetRegionValue r (MkI64 1) $ \i =>
+      LetRegion $ \r =>
+      LetRegionValue r (FunApp "genList" genList i) $ \l =>
+      PrintValue l
+
+test_8 : Program
+test_8 =
+  let genList : {r_in : _} -> {loc_in : Loc r_in _} -> {r_out : _} -> {loc_out : Loc r_out _} -> Exp I64 loc_in -> Exp Examples2.my_ty loc_out
+      genList i =
+        LetRegion $ \r =>
+        LetRegionValue r (MkI64 10) $ \ten =>
+        LetRegion $ \r =>
+        LetRegionValue r (EqI64 ten i) $ \b =>
+        CaseEither b
+          (\f =>
+              LetRegion $ \r =>
+              LetRegionValue r (MkI64 1) $ \one =>
+              LetRegion $ \r =>
+              LetRegionValue r (AddI64 one i) $ \next =>
+              MkLeft $ MkRTup2 (Copy i) $ MkBox {x=delay my_ty} $ FunApp "genList" genList next
+          )
+          (\t => MkRight MkT0)
+
+      printList : {r_in : _} -> {loc_in : Loc r_in _} -> {r_out : _} -> {loc_out : Loc r_out _} -> Exp Examples2.my_ty loc_in -> Exp T0 loc_out
+      printList a =
+        CaseEither a
+          (\l =>
+              PrjFst l $ \hd =>
+              PrjSnd l $ \tl =>
+              LetRegion $ \r =>
+              LetRegionValue r (PrintI64 hd) $ \t0 =>
+              FunApp "printList" printList $ UnBox {x=delay my_ty} tl
+          )
+          (\r => MkT0)
+  in Main $
+      LetRegion $ \r =>
+      LetRegionValue r (MkI64 1) $ \i =>
+      LetRegion $ \r =>
+      LetRegionValue r (FunApp "genList" genList i) $ \l =>
+      LetRegion $ \r =>
+      LetRegionValue r (PrintValue l) $ \i =>
+      FunApp "printList" printList l
 
 {-
   TODO:
     handle:
  done - Program
- done - Main3
- done - FunApp2
+ done - Main
+ done - FunApp
  done - AddI64
  done - EqI64
 -}
@@ -288,7 +326,7 @@ main = do
   --putStr !(toBufferDyn sample_box_04)
   --putStr !(toBufferDyn sample_box_05)
   --putStr !(toBufferDyn sample_box_06)
-  putStr !(toBufferDyn sample_box_07)
+  --putStr !(toBufferDyn sample_box_07)
   {-
   putStr !(toBufferDyn i64)
   putStr !(toBufferDyn sample_tup2_01)
@@ -316,4 +354,4 @@ main = do
   --putStr !(toBufferDyn sample_print_either_elim2)
   --putStr !(toBufferDyn sample_print_either_elim5_forward_ind) -- TODO
   --putStr !(toBufferDyn sample_print_either_elim5_backward_ind)
-  --putStr !(compileProgram test_6)
+  putStr !(compileProgram test_8)
