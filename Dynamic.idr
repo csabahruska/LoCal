@@ -9,6 +9,8 @@ import Data.String
 import Control.Monad.State
 import Data.Primitives.Interpolation
 import Control.ANSI
+import System.File
+import System
 
 data Effect = Read | Write | Allocated | Traversed
 
@@ -257,12 +259,17 @@ getEffect loc = do
 
 
 -- IDEA: use Loc values in Map as keys via its show function
+addStaticSizeEndWitness : (loc : Loc r) -> String -> M ()
 
 getEndWitness : (loc : Loc r) -> M String
 getEndWitness loc = do
   ends <- gets (.local.endwitness)
   let Just ew = lookup (show loc) ends
-        | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc endwitness for \{loc}\n endwitness map: \{show ends}"
+        | Nothing =>
+            -- TODO: generate end-witness for static sized types
+            if isStaticSize (getLocTy loc)
+              then addStaticSizeEndWitness loc "getEndWitness" >> getEndWitness loc
+              else assert_total $ idris_crash $ "INTERNAL ERROR: missing loc endwitness for \{loc}\n endwitness map: \{show ends}"
   pure ew
 
 getCursor : (loc : Loc r) -> M String
@@ -287,6 +294,7 @@ genCursor {r} loc = do
         lift $ print $ colored BrightRed " !! add cursor \{c} :=\n \{loc}\n\n"
         lift $ print $ colored BrightMagenta " !! static index \{c} := \{show (getStaticIndex loc)}\n\n"
         addCur c loc
+        emit "/* \{c} = \{loc} */"
         pure c
   case lookup locKey !(gets (.local.locations)) of
     Just v  => do
@@ -321,11 +329,10 @@ updateEndWitnessTo {loc2} loc e = do
   modify {local.endwitness $= insert (show loc) ew}
   lift $ print $ colored BrightBlue " update endwitness to \{ew} for\n \{loc}\n\n"
 
-addStaticSizeEndWitness : (loc : Loc r) -> String -> M ()
 addStaticSizeEndWitness l msg = do
   let t = getLocTy l
       Just bytes = getStaticSize t
-        | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing statis size for: \{l}"
+        | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing static size for: \{l}"
   cur <- getCursor l
   let ew = "\{cur}_end"
   modify {local.endwitness $= insert (show l) ew}
@@ -395,7 +402,7 @@ fillDyn (MkRTup2 a b) = do
   cur <- genCursor loc -- cursor for RTup2, which is: indirection-to-snd/fst-endwitness + fst + snd
   fillDyn a
   unless (isStaticSize (getTy a)) $ do
-    emit "*(char**) \{cur} = \{!(getEndWitness $ getLoc a)};"
+    emit "*(int*) \{cur} = \{!(getEndWitness $ getLoc a)} - \{cur};"
   fillDyn b
   updateEndWitnessTo loc b
 
@@ -447,6 +454,7 @@ fillDyn (MkRight b) = do
 fillDyn (PrjFst a cont) = do
   lift $ putStrLn " ++ PrjFst"
   fillDyn a
+  -- TODO: define end-witness for fst
   fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
   -- Q: is endwintness needed for fst?
 fillDyn (PrjSnd {a, loc_tup} tup cont) = do
@@ -455,16 +463,16 @@ fillDyn (PrjSnd {a, loc_tup} tup cont) = do
   let locFst = LocAfterTag "RTup2" a loc_tup
   lift $ putStrLn " ++ PrjSnd2 \{locFst}"
   _ <- genCursor loc
-  _ <- genCursor loc_tup
+  cur_tup <- genCursor loc_tup
   _ <- genCursor locFst
   --updateEndWitnessTo loc tup
   case getStaticSize a of
     Just _  => do
-      lift $ putStrLn " getStaticSize - true"
+      emit "// getStaticSize - true"
       addStaticSizeEndWitness locFst "static index for RTup2Snd"
     Nothing => do
-      lift $ putStrLn " getStaticSize - false"
-      defineEndWitness locFst "*(char**)\{!(getCursor loc)}; // get Snd cursor from RTup2" -- get random access pointer to snd
+      emit "// getStaticSize - false"
+      defineEndWitness locFst "\{cur_tup} + *(int*)\{!(getCursor loc_tup)}; // get Snd cursor from RTup2" -- get random access pointer to snd
   fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
   -- Q: is endwintness needed for snd?
 
@@ -498,7 +506,7 @@ fillDyn (PrintI64 {loc_in} a) = do
   cur <- genCursor loc
   addStaticSizeEndWitness loc "T0"
   cur_in <- getCursor loc_in
-  emit "printf(\"%ld\\n\", *(int*) \{cur_in});"
+  emit "printf(\"%d\\n\", *(int*) \{cur_in});"
 
 fillDyn (PrintValue {loc_in} a) = do
   lift $ putStrLn " ++ PrintValue"
@@ -521,6 +529,10 @@ fillDyn (LetRegionValue {a,t} r v cont) = do
   addCur c (LocStart t r)
   fillDyn {t=t} v
   fillDyn {t=a} (cont Var)
+
+  -- TODO: add DeRef
+  -- TODO: add CaseSTup2
+  -- TODO: add DeRefLong
 
 --  LetRegionValue : (r : Region) -> Exp t (LocStart t r) -> (Exp t (LocStart t r) -> Exp a loc) -> Exp a loc
 {-
@@ -546,6 +558,7 @@ fillDyn (CaseEither {scrut_loc} scrut cont_left cont_right) = do
     emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expR)};"
   emit "}"
   defineEndWitness loc cur_end_tmp
+  -- TODO: add end-witness for scrut_loc ; this can be done when both left and right eliminator has it
 
 fillDyn (Copy {r_in, loc_in} _) = do
   lift $ putStrLn " ++ Copy"
@@ -555,7 +568,10 @@ fillDyn (Copy {r_in, loc_in} _) = do
   emit "memcpy(\{cur_dst}, \{cur_src}, \{cur_src_end} - \{cur_src});"
   defineEndWitness loc "\{cur_dst} + (\{cur_src_end} - \{cur_src})"
 
-fillDyn Var = emit "// Var \{t}" -- assert_total $ idris_crash $ "Var"
+fillDyn Var = do
+  cur <- genCursor loc
+  emit "/* \{cur} = \{loc} */"
+  emit "// Var \{t}" -- assert_total $ idris_crash $ "Var"
 
 fillDyn (FunApp {loc_in} fun_name fun arg) = do
   lift $ putStrLn " ++ FunApp \{fun_name}"
@@ -582,6 +598,8 @@ fillDyn (FunApp {loc_in} fun_name fun arg) = do
       emitDecl "char* \{fun_name}(char* \{cur_arg}, char* \{cur_out});"
       emit "char* \{fun_name}(char* \{cur_arg}, char* \{cur_out}) {"
       indent $ do
+        emit "/* \{cur_arg} = \{loc_in} */"
+        emit "/* \{cur_out} = \{loc} */"
         fillDyn (fun Var)
         emit "return \{!(getEndWitness loc)};"
       emit "}"
@@ -623,8 +641,16 @@ toBufferDyn {t} e = do
   pure $ unlines $ c_header :: [unlines (reverse funLines) | funLines <- s.decls :: values s.code]
 
 partial public export
-compileProgram : Program -> IO String
-compileProgram (Main e) = toBufferDyn e
+compileProgram : String -> Program -> IO String
+compileProgram name (Main e) = do
+  src <- toBufferDyn e
+  let fname = name ++ ".c"
+  Right _ <- writeFile fname src
+    | Left err => idris_crash (show err)
+  (c_msg, 0) <- run "gcc \{fname} -o \{name}"
+    | err => idris_crash (show err)
+  putStrLn c_msg
+  pure src
 
 {-
   INSIGHTS:

@@ -121,6 +121,8 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
 
   -- primops
   PrintI64 : {r_in : _} -> {loc_in : Loc r_in} -> Exp I64 loc_in -> Exp T0 loc
+
+  -- prints the buffer content at the location in hexadecimal ; requires full traversal effect on the argument, so the end-witness should be available
   PrintValue : {r_in : _} -> {t : _} -> {loc_in : Loc r_in} -> Exp t loc_in -> Exp T0 loc
 
   -- indirection
@@ -134,7 +136,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
   MkBox : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc : Loc r} -> Exp x loc -> Exp (Box i) loc
   UnBox : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc : Loc r} -> Exp (Box i) loc -> Exp x loc
 
-  -- to copy values cross region
+  -- to copy values cross region ; requires full traversal effect on the argument, so the end-witness should be available
   Copy : {r_in : _} -> {loc_in : Loc r_in} -> Exp t loc_in -> Exp t loc
 
   -- primitive values

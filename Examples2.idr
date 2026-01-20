@@ -32,6 +32,32 @@ sample_box_06 = MkLeft $ MkRTup2 (MkI64 1) sample_box_04
 sample_box_07 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc
 sample_box_07 = MkLeft $ MkRTup2 (MkI64 2) $ MkBox {x=delay my_ty} sample_box_06
 
+
+-- data IntList = Cons IntList Int
+--              | Nil
+
+mutual
+  rev_my_ty : Ty
+  rev_my_ty = Either (RTup2 rev_my_ty_box I64) T0
+
+  rev_my_ty_box : Ty
+  rev_my_ty_box = Box {x=rev_my_ty} {xs=[rev_my_ty]} Here
+
+sample_box_13 : {loc : _} -> Exp Examples2.rev_my_ty loc
+sample_box_13 = MkRight MkT0
+
+sample_box_14 : {r : _} -> {loc : Loc r} -> Exp Examples2.rev_my_ty_box loc
+sample_box_14 = MkBox {x=delay rev_my_ty} sample_box_13
+
+sample_box_15 : {r : _} -> {loc : Loc r} -> Exp Examples2.rev_my_ty loc
+sample_box_15 = UnBox {x=delay rev_my_ty} sample_box_14
+
+sample_box_16 : {r : _} -> {loc : Loc r} -> Exp Examples2.rev_my_ty loc
+sample_box_16 = MkLeft $ MkRTup2 sample_box_14 (MkI64 1)
+
+sample_box_17 : {r : _} -> {loc : Loc r} -> Exp Examples2.rev_my_ty loc
+sample_box_17 = MkLeft $ MkRTup2 (MkBox {x=delay rev_my_ty} sample_box_16) (MkI64 2)
+
 -------------------------------------------
 -- END of boxing experiment
 -------------------------------------------
@@ -284,6 +310,13 @@ test_8 =
               LetRegionValue r (MkI64 1) $ \one =>
               LetRegion $ \r =>
               LetRegionValue r (AddI64 one i) $ \next =>
+              -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+              -- TODO: what should create the end-witness for COPY?
+              -- Q: what should be the rules for end-witness construction?
+              -- TODO: design the end-witness construction for value consumption primitives
+              -- IDEA/HACK: auto construct end-witness for static sized values/types
+              -- TODO: design the end-witness creation for either and tup and box type consuming operations
+              -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
               MkLeft $ MkRTup2 (Copy i) $ MkBox {x=delay my_ty} $ FunApp "genList" genList next
           )
           (\t => MkRight MkT0)
@@ -324,6 +357,93 @@ test_9 =
   in Main $
       LetRegion $ \r =>
       LetRegionValue r sample_box_07 $ \l =>
+      FunApp "printList" printList l
+
+test_10 : Program
+test_10 =
+  let printList : Nat -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.my_ty loc_in -> Exp T0 loc_out
+      printList unroll a =
+        CaseEither a
+          (\l =>
+              PrjFst l $ \hd =>
+              PrjSnd l $ \tl =>
+              LetRegion $ \r =>
+              LetRegionValue r (PrintI64 hd) $ \t0 =>
+              case unroll of
+                0   => FunApp "printList" (printList 0) $ UnBox {x=delay my_ty} tl
+                S i => printList i $ UnBox {x=delay my_ty} tl
+          )
+          (\r => MkT0)
+  in Main $
+      LetRegion $ \r =>
+      LetRegionValue r sample_box_07 $ \l =>
+      FunApp "printList" (printList 2) l
+
+test_11 : Program
+test_11 =
+  let printList : Nat -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.rev_my_ty loc_in -> Exp T0 loc_out
+      printList unroll a =
+        CaseEither a
+          (\l =>
+              PrjFst l $ \hd =>
+              PrjSnd l $ \tl =>
+              LetRegion $ \r =>
+              LetRegionValue r (PrintI64 tl) $ \t0 =>
+              case unroll of
+                0   => FunApp "printList" (printList 0) $ UnBox {x=delay rev_my_ty} hd
+                S i => printList i $ UnBox {x=delay rev_my_ty} hd
+          )
+          (\r => MkT0)
+  in Main $
+      LetRegion $ \r =>
+      LetRegionValue r sample_box_17 $ \l =>
+      LetRegion $ \r =>
+      LetRegionValue r (PrintValue l) $ \l2 =>
+      FunApp "printList" (printList 2) l
+
+test_12 : Program
+test_12 =
+  let genList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp I64 loc_in -> Exp Examples2.rev_my_ty loc_out
+      genList i =
+        LetRegion $ \r =>
+        LetRegionValue r (MkI64 10) $ \ten =>
+        LetRegion $ \r =>
+        LetRegionValue r (EqI64 ten i) $ \b =>
+        CaseEither b
+          (\f =>
+              LetRegion $ \r =>
+              LetRegionValue r (MkI64 1) $ \one =>
+              LetRegion $ \r =>
+              LetRegionValue r (AddI64 one i) $ \next =>
+              -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+              -- TODO: what should create the end-witness for COPY?
+              -- Q: what should be the rules for end-witness construction?
+              -- TODO: design the end-witness construction for value consumption primitives
+              -- IDEA/HACK: auto construct end-witness for static sized values/types
+              -- TODO: design the end-witness creation for either and tup and box type consuming operations
+              -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+              MkLeft $ MkRTup2 (MkBox {x=delay rev_my_ty} $ FunApp "genList" genList next) (Copy i)
+          )
+          (\t => MkRight MkT0)
+
+      printList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.rev_my_ty loc_in -> Exp T0 loc_out
+      printList a =
+        CaseEither a
+          (\l =>
+              PrjFst l $ \tl =>
+              PrjSnd l $ \hd =>
+              LetRegion $ \r =>
+              LetRegionValue r (PrintI64 hd) $ \t0 =>
+              FunApp "printList" printList $ UnBox {x=delay rev_my_ty} tl
+          )
+          (\r => MkT0)
+  in Main $
+      LetRegion $ \r =>
+      LetRegionValue r (MkI64 1) $ \i =>
+      LetRegion $ \r =>
+      LetRegionValue r (FunApp "genList" genList i) $ \l =>
+      LetRegion $ \r =>
+      LetRegionValue r (PrintValue l) $ \i =>
       FunApp "printList" printList l
 
 {-
@@ -372,7 +492,10 @@ main = do
   --putStr !(toBufferDyn sample_print_either_elim2)
   --putStr !(toBufferDyn sample_print_either_elim5_forward_ind) -- TODO
   --putStr !(toBufferDyn sample_print_either_elim5_backward_ind)
-  putStr !(compileProgram test_9)
+  _ <- compileProgram "test11" test_11
+  _ <- compileProgram "test8" test_8
+  _ <- compileProgram "test12" test_12
+  pure ()
 {-
 TODO:
   list:
