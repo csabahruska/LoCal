@@ -229,7 +229,7 @@ test_5 =
           FunApp "myPrint" myPrint i
 
 {-
-  TODO:
+  done:
     add Int primops
       - arithmetic: + - * /
       - comparison: eq lt gt le ge
@@ -445,16 +445,6 @@ test_12 =
       LetRegion $ \r =>
       LetRegionValue r (PrintValue l) $ \i =>
       FunApp "printList" printList l
-
-{-
-  TODO:
-    handle:
- done - Program
- done - Main
- done - FunApp
- done - AddI64
- done - EqI64
--}
 
 -- test
 
