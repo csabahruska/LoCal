@@ -96,14 +96,6 @@ data Loc : (r : Region) -> Type where
     - implicit sharing: use coercions for automatic DUP insertion
 -}
 
-{-
-  TODO: refactor to
-    - simple expression ; value definition
-    - bind chain ; various lets, return value
-    + check this during hoas interpretation
-    + the last expression of a bind chain must be a hoas variable
--}
-
 public export
 data Exp : (t : Ty) -> (loc : Loc r) -> Type where
 
@@ -114,7 +106,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
   -- Q: not needed? A: Right, let is not needed, use LetRegionValue instead
   --Let : {r_in : _} -> {t_in : _} -> {loc_in : Loc r_in t_in} -> Exp t_in loc_in -> (Exp t_in loc_in -> Exp t loc) -> Exp t loc
 
-  -- Q: not needed? A: Not needed, use meta language let because every LoCal value istead, because every value resides only one location
+  -- Q: not needed? A: Not needed, use meta language let because every value resides only one location
   --LetSubValue : {loc_in : Loc r t_in} -> {loc : Loc r t} -> Exp t_in loc_in -> (Exp t_in loc_in -> Exp t loc) -> Exp t loc
 
   LetRegionValue : {t : _} -> {a : _} -> {loc : Loc r} -> (r : Region) -> Exp t (LocStart t r) -> (Exp t (LocStart t r) -> Exp a loc) -> Exp a loc
@@ -216,7 +208,6 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
                -- A: there is no problem because the location would be the same and the end witness will be different
                -- IDEAS: is the result size an Either Int Int?
 
-  -- TODO: check the typing rules for function application in LoCal type system
   FunApp : {r_in : _} -> {r_out : _} -> {t_arg : _} -> {loc_in : Loc r_in} -> {loc_out : Loc r_out} ->
            String ->
            (Exp t_arg loc_in -> Exp res loc_out) -> Exp t_arg loc_in -> Exp res loc_out
@@ -232,19 +223,9 @@ data Program : Type where
 
 {-
   TODO:
-    - separate expressions from value definitions
-    - make all location variables linear, one for values one for locations
-    - add function return (terminator expression)
-      + that would take a location and a value
-      + or it would take a variable
-         * this would need a new location expression type: function return value ; NO - it should use the after location
--}
-
-{-
-  TODO:
     - write buffer based interpreter
-    - write C backend
-    - write example for function call
+    done - write C backend
+    done - write example for function call
   Q: should we distinguish register and memory values ; ref or immediate value?
 -}
 
@@ -381,7 +362,7 @@ fn = \a => \b => b
         gibbon allocates garbage into a separate region, and it puts the output into the same region
       - how will my interpreter handle this?
   TODO:
-    - add Ind eliminator: DeRef
+    done - add Ind eliminator: DeRef
     Q: when a pointer is a forward reference then is it possile that it will be dereferred before it is written?
     A: yes, which is wrong.
       Q: how to avoid this situation? is it possible to track effects in types?
