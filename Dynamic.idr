@@ -240,8 +240,6 @@ getLoc {l} _ = l
 addCur : String -> Loc r -> M ()
 addCur c l = modify {local.locations $= insert (show l) c}
 
-addEndWitness : String -> Loc r -> M ()
-addEndWitness c l = modify {local.endwitness $= insert (show l) c}
 
 -- effect handling
 addEffect : (loc : Loc r) -> Effect -> M ()
@@ -259,17 +257,17 @@ getEffect loc = do
 
 
 -- IDEA: use Loc values in Map as keys via its show function
-addStaticSizeEndWitness : (loc : Loc r) -> String -> M ()
+
+lookupEndWitness : (loc : Loc r) -> M (Maybe String)
+lookupEndWitness loc = do
+  ends <- gets (.local.endwitness)
+  pure $ lookup (show loc) ends
 
 getEndWitness : (loc : Loc r) -> M String
 getEndWitness loc = do
   ends <- gets (.local.endwitness)
   let Just ew = lookup (show loc) ends
-        | Nothing =>
-            -- TODO: generate end-witness for static sized types
-            if isStaticSize (getLocTy loc)
-              then addStaticSizeEndWitness loc "getEndWitness" >> getEndWitness loc
-              else assert_total $ idris_crash $ "INTERNAL ERROR: missing loc endwitness for \{loc}\n endwitness map: \{show ends}"
+        | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc endwitness for \{loc}\n endwitness map: \{show ends}"
   pure ew
 
 getCursor : (loc : Loc r) -> M String
@@ -316,8 +314,13 @@ genCursor {r} loc = do
           emit "char* \{c} = \{!(getCursor l)} + \{tagSize}; // STATIC INDEX \{show (getStaticIndex loc)} in \{show (getLocRegion loc)}"
           pure c
 
+hasEndWitness : Loc r -> M Bool
+hasEndWitness loc = do
+  ends <- gets (.local.endwitness)
+  pure $ isJust $ lookup (show loc) ends
+
 defineEndWitness : (loc : Loc r) -> String -> M ()
-defineEndWitness loc value = do
+defineEndWitness loc value = unless !(hasEndWitness loc) $ do
   cur <- getCursor loc
   let ew = "\{cur}_end"
   modify {local.endwitness $= insert (show loc) ew}
@@ -329,73 +332,74 @@ updateEndWitnessTo {loc2} loc e = do
   modify {local.endwitness $= insert (show loc) ew}
   lift $ print $ colored BrightBlue " update endwitness to \{ew} for\n \{loc}\n\n"
 
+addStaticSizeEndWitness : (loc : Loc r) -> String -> M ()
 addStaticSizeEndWitness l msg = do
   let t = getLocTy l
       Just bytes = getStaticSize t
         | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing static size for: \{l}"
-  cur <- getCursor l
-  let ew = "\{cur}_end"
-  modify {local.endwitness $= insert (show l) ew}
-  emit "char* \{ew} = \{cur} + \{bytes}; // \{msg}"
-  lift $ print $ colored BrightCyan " add endwitness to \{ew} for\n \{l}\n\n"
+  unless !(hasEndWitness l) $ do
+    cur <- getCursor l
+    let ew = "\{cur}_end"
+    modify {local.endwitness $= insert (show l) ew}
+    emit "char* \{ew} = \{cur} + \{bytes}; // \{msg}"
+    lift $ print $ colored BrightCyan " add endwitness to \{ew} for\n \{l}\n\n"
+
+tryAddStaticSizeEndWitness : Loc r -> String -> M ()
+tryAddStaticSizeEndWitness loc msg = do
+  when (isStaticSize (getLocTy loc)) $ do
+    addStaticSizeEndWitness loc "Var"
+
+defineRTup2FstEndWitness : {r : _} -> Loc r -> Ty -> M ()
+defineRTup2FstEndWitness loc_tup a = do
+  cur_tup <- genCursor loc_tup
+  let locFst = LocAfterTag "RTup2" a loc_tup
+  _ <- genCursor locFst
+  case getStaticSize a of
+    Just _  => do
+      emit "// getStaticSize - true"
+      addStaticSizeEndWitness locFst "RTup2 - static sized fst"
+    Nothing => do
+      emit "// getStaticSize - false"
+      defineEndWitness locFst "\{cur_tup} + *(int*)\{cur_tup}; // get Snd cursor from RTup2" -- get random access pointer to snd
+
+maybeSetEndWitness : Loc r -> Loc r -> M ()
+maybeSetEndWitness loc value = do
+  ends <- gets (.local.endwitness)
+  case lookup (show value) ends of
+    Nothing => pure () -- todo
+    Just ew => modify {local.endwitness $= insert (show loc) ew}
 
 partial fillDyn : {r : _ } -> {t : _ } -> {loc : Loc r} -> Exp t loc -> M ()
 
+-- HINT: no end-witness definition is needed for static sized types
+
 fillDyn (MkBox {i} v) = do
   lift $ putStrLn " ++ MkBox \{elemToNat i}"
-  addCur !(genCursor loc) (getLoc v)
   fillDyn v
-  updateEndWitnessTo loc v
-
-{-
-[printList] char* cur11 = cur8_end; // STATIC INDEX Just 2 in MkRegion 1
-[printList] // Var Box 0
-ERROR: INTERNAL ERROR: missing loc endwitness for
- LocAfter (Box 0)
- (LocAfterTag RTup2 (I64)
- (LocAfterTag Left (RTup2 (I64) (Box 0))
- (LocStart (Either (RTup2 (I64) (Box 0)) (T0)) (MkRegion 1))))
- endwitness map: fromList [
- ("LocAfterTag RTup2 (I64)\n
-   (LocAfterTag Left (RTup2 (I64) (Box 0))\n
-   (LocStart (Either (RTup2 (I64) (Box 0)) (T0)) (MkRegion 1)))", "cur8_end"
- ),
- ("LocStart (Either (RTup2 (I64) (Box 0)) (T0)) (MkRegion 1)", "cur4_end")
- ,
- ("LocStart (T0) (MkRegion 9)", "cur10_end")
- ]
-
--}
+  -- inherits end-witness
 
 fillDyn (UnBox {i} {x} v) = do
   lift $ putStrLn " ++ UnBox \{elemToNat i}"
   fillDyn v
-  let l = loc
-  lift $ putStrLn " ++ UnBox - \{l}"
-  cur_l <- genCursor l
-  --addCur cur_l (getLoc v)
-  lift $ putStrLn " ++ UnBox \{elemToNat i} - A"
-  lift $ putStrLn " ++ UnBox \{elemToNat i} - B"
-  --updateEndWitnessTo loc v
-  lift $ putStrLn " ++ UnBox \{elemToNat i} - C"
+  -- inherits end-witness
 
 fillDyn MkT0 = do
   lift $ putStrLn " ++ MkT0"
-  cur <- genCursor loc
-  addStaticSizeEndWitness loc "T0"
+  _ <- genCursor loc
+  addStaticSizeEndWitness loc "MkT0"
 
 fillDyn (MkI64 i) = do
   lift $ putStrLn " ++ MkI64 \{i}"
   cur <- genCursor loc
-  addStaticSizeEndWitness loc "I64"
   emit "*(int*) \{cur} = \{i};"
+  addStaticSizeEndWitness loc "MkI64"
 
 fillDyn (MkSTup2 a b) = do
   lift $ putStrLn " ++ MkSTup2"
   cur <- genCursor loc
   fillDyn a
   fillDyn b
-  updateEndWitnessTo loc b
+  updateEndWitnessTo loc b -- error if missing
 
 fillDyn (MkRTup2 a b) = do
   lift $ putStrLn " ++ MkRTup2"
@@ -404,7 +408,7 @@ fillDyn (MkRTup2 a b) = do
   unless (isStaticSize (getTy a)) $ do
     emit "*(int*) \{cur} = \{!(getEndWitness $ getLoc a)} - \{cur};"
   fillDyn b
-  updateEndWitnessTo loc b
+  updateEndWitnessTo loc b -- error if missing
 
 {-
   NOTES:
@@ -416,82 +420,81 @@ fillDyn (MkRTup2 a b) = do
   TODO: track effects for locations
 -}
 
-fillDyn (MkInd {loc_in} _) = do
+fillDyn (MkInd {loc_in} v) = do
   lift $ putStrLn " ++ MkInd"
+  fillDyn v
   cur <- genCursor loc
-  addStaticSizeEndWitness loc "Ind" -- 64 bit pointer
   cur_in <- getCursor loc_in
   -- TODO: support forward pointers
   -- Q: how to decide if a location is after or before of another?
   -- A: it is possible to compute that from loctions
   --  TODO: write such a function
   emit "*(char**) \{cur} = \{cur_in};"
+  addStaticSizeEndWitness loc "MkInd"
 
-fillDyn (MkIndLong {loc_in} _) = do
+fillDyn (MkIndLong {loc_in} v) = do
   lift $ putStrLn " ++ MkIndLong"
+  fillDyn v
   cur <- genCursor loc
-  addStaticSizeEndWitness loc "IndLong" -- 64 bit pointer
   cur_in <- getCursor loc_in
   emit "*(char**) \{cur} = \{cur_in};"
+  addStaticSizeEndWitness loc "MkIndLong"
 
 fillDyn (MkLeft a) = do
   lift $ putStrLn " ++ MkLeft"
   cur <- genCursor loc
   emit "*(char*) \{cur} = 0; // LEFT_TAG"
   fillDyn a
-  updateEndWitnessTo loc a
+  updateEndWitnessTo loc a -- error if missing
 
 fillDyn (MkRight b) = do
   lift $ putStrLn " ++ MkRight"
   cur <- genCursor loc
   emit "*(char*) \{cur} = 1; // RIGHT_TAG"
   fillDyn b
-  updateEndWitnessTo loc b
--- TODO: implement effect tracking and cursor and end-witness generation
--- Q: should we get rid off LocBoxCorcion with removing Ty from Loc type?
---    maybe i should try this out in a branch?
---    what would i lose if only Exp would track types and not locations?
-fillDyn (PrjFst a cont) = do
+  updateEndWitnessTo loc b -- error if missing
+{-
+  TODO: implement effect tracking and cursor and end-witness generation
+  Q: should we get rid off LocBoxCorcion with removing Ty from Loc type?
+      maybe i should try this out in a branch?
+      what would i lose if only Exp would track types and not locations?
+  A: yes, it makes the system simpler
+-}
+
+fillDyn (PrjFst {a, loc_tup} tup cont) = do
   lift $ putStrLn " ++ PrjFst"
-  fillDyn a
-  -- TODO: define end-witness for fst
-  fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
-  -- Q: is endwintness needed for fst?
-fillDyn (PrjSnd {a, loc_tup} tup cont) = do
-  lift $ putStrLn " ++ PrjSnd1"
   fillDyn tup
-  let locFst = LocAfterTag "RTup2" a loc_tup
-  lift $ putStrLn " ++ PrjSnd2 \{locFst}"
-  _ <- genCursor loc
-  cur_tup <- genCursor loc_tup
-  _ <- genCursor locFst
-  --updateEndWitnessTo loc tup
-  case getStaticSize a of
-    Just _  => do
-      emit "// getStaticSize - true"
-      addStaticSizeEndWitness locFst "static index for RTup2Snd"
-    Nothing => do
-      emit "// getStaticSize - false"
-      defineEndWitness locFst "\{cur_tup} + *(int*)\{!(getCursor loc_tup)}; // get Snd cursor from RTup2" -- get random access pointer to snd
+  defineRTup2FstEndWitness loc_tup a
   fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
-  -- Q: is endwintness needed for snd?
+
+fillDyn (PrjSnd {a, b, loc_tup} tup cont) = do
+  lift $ putStrLn " ++ PrjSnd"
+  fillDyn tup
+  defineRTup2FstEndWitness loc_tup a
+  let locFst = LocAfterTag "RTup2" a loc_tup
+      locSnd = LocAfter b locFst
+  _ <- genCursor locSnd
+  fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
+  -- try to set end-witness for RTup2 if snd was traversed
+  maybeSetEndWitness loc_tup locSnd
 
 fillDyn (AddI64 {loc_in, loc_in2} a b) = do
   lift $ putStrLn " ++ AddI64"
   fillDyn a
   fillDyn b
   cur <- genCursor loc
-  addStaticSizeEndWitness loc "I64"
   cur_in <- getCursor loc_in
   cur_in2 <- getCursor loc_in2
   emit "*(int*) \{cur} = *(int*) \{cur_in} + *(int*) \{cur_in2};"
+  addStaticSizeEndWitness loc_in  "AddI64 - arg1"
+  addStaticSizeEndWitness loc_in2 "AddI64 - arg2"
+  addStaticSizeEndWitness loc     "AddI64 - result"
 
 fillDyn (EqI64 {loc_in, loc_in2} a b) = do
   lift $ putStrLn " ++ EqI64"
   fillDyn a
   fillDyn b
   cur <- genCursor loc
-  addStaticSizeEndWitness loc "Either T0 T0 (alias Bool)"
   cur_in <- getCursor loc_in
   cur_in2 <- getCursor loc_in2
   emit "if (*(int*) \{cur_in} == *(int*) \{cur_in2}) { // true"
@@ -499,23 +502,27 @@ fillDyn (EqI64 {loc_in, loc_in2} a b) = do
   emit "} else { // false"
   indent $ emit "*(char*) \{cur} = 0; // LEFT_TAG"
   emit "}"
+  addStaticSizeEndWitness loc_in  "EqI64 - arg1"
+  addStaticSizeEndWitness loc_in2 "EqI64 - arg2"
+  addStaticSizeEndWitness loc     "EqI64 - result"
 
 fillDyn (PrintI64 {loc_in} a) = do
   lift $ putStrLn " ++ PrintI64"
   fillDyn a
   cur <- genCursor loc
-  addStaticSizeEndWitness loc "T0"
   cur_in <- getCursor loc_in
   emit "printf(\"%d\\n\", *(int*) \{cur_in});"
+  addStaticSizeEndWitness loc_in  "PrintI64 - arg1"
+  addStaticSizeEndWitness loc     "PrintI64 - result"
 
 fillDyn (PrintValue {loc_in} a) = do
   lift $ putStrLn " ++ PrintValue"
   fillDyn a
   cur <- genCursor loc
-  addStaticSizeEndWitness loc "T0"
   cur_in <- getCursor loc_in
   cur_end <- getEndWitness loc_in
   emit "print_hex(\{cur_in}, \{cur_end} - \{cur_in});"
+  addStaticSizeEndWitness loc "PrintValue - result"
 
 fillDyn (LetRegion cont) = do
   lift $ putStrLn " ++ LetRegion"
@@ -526,18 +533,15 @@ fillDyn (LetRegionValue {a,t} r v cont) = do
   lift $ putStrLn " ++ LetRegionValue"
   c <- newCursorName
   emit "char *\{c} = newRegion();"
-  addCur c (LocStart t r)
+  let loc_start = LocStart t r
+  addCur c loc_start
   fillDyn {t=t} v
+  tryAddStaticSizeEndWitness loc_start "LetRegionValue"
   fillDyn {t=a} (cont Var)
 
   -- TODO: add DeRef
   -- TODO: add CaseSTup2
   -- TODO: add DeRefLong
-
---  LetRegionValue : (r : Region) -> Exp t (LocStart t r) -> (Exp t (LocStart t r) -> Exp a loc) -> Exp a loc
-{-
-fillDyn (Let {r_in} {loc_in} a cont) = fillDyn {r=r_in} {loc=loc_in} a >> fillDyn (cont a)
--}
 
 fillDyn (CaseEither {scrut_loc} scrut cont_left cont_right) = do
   lift $ putStrLn " ++ CaseEither"
@@ -546,19 +550,35 @@ fillDyn (CaseEither {scrut_loc} scrut cont_left cont_right) = do
   let cur_end_tmp = "\{!(newCursorName)}_end_tmp"
   emit "char* \{cur_end_tmp} = 0; // uninitalized"
   cur_tag <- getCursor scrut_loc
+
+  let cur_tag_end_tmp = "\{cur_tag}_end_tmp"
+  emit "char* \{cur_tag_end_tmp} = 0; // uninitalized"
+
   emit "if (*(char*) \{cur_tag} == 0) { // LEFT"
-  indent $ localScope $ do
+  scrut_ew_left <- indent $ localScope $ do
     let expL = cont_left Var
     fillDyn expL
     emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expL)};"
+    scrut_ew <- lookupEndWitness scrut_loc
+    case scrut_ew of
+      Nothing => pure ()
+      Just ew => emit "\{cur_tag_end_tmp} = \{ew};"
+    pure $ isJust scrut_ew
   emit "} else { // RIGHT"
-  indent $ localScope $ do
+  scrut_ew_right <- indent $ localScope $ do
     let expR = cont_right Var
     fillDyn expR
     emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expR)};"
+    scrut_ew <- lookupEndWitness scrut_loc
+    case scrut_ew of
+      Nothing => pure ()
+      Just ew => emit "\{cur_tag_end_tmp} = \{ew};"
+    pure $ isJust scrut_ew
   emit "}"
   defineEndWitness loc cur_end_tmp
-  -- TODO: add end-witness for scrut_loc ; this can be done when both left and right eliminator has it
+  -- add end-witness for scrut_loc ; this can be done when both left and right eliminator has it
+  when (scrut_ew_left && scrut_ew_right) $ do
+    defineEndWitness scrut_loc cur_tag_end_tmp
 
 fillDyn (Copy {r_in, loc_in} _) = do
   lift $ putStrLn " ++ Copy"
@@ -572,6 +592,7 @@ fillDyn Var = do
   cur <- genCursor loc
   emit "/* \{cur} = \{loc} */"
   emit "// Var \{t}" -- assert_total $ idris_crash $ "Var"
+  tryAddStaticSizeEndWitness loc "Var"
 
 fillDyn (FunApp {loc_in} fun_name fun arg) = do
   lift $ putStrLn " ++ FunApp \{fun_name}"
@@ -580,16 +601,13 @@ fillDyn (FunApp {loc_in} fun_name fun arg) = do
   cur_in <- getCursor loc_in
   -- HINT: fun may or may not need arg end witness
   --    Q: how to handle this?
-  --cur_in_end <- getEndWitness loc_in
+  --    A: arg end-witness is not needed
 
   -- TODO: omit end-witness for static sized outputs
-  -- TODO: addStaticSizeEndWitness loc "T0"
   defineEndWitness loc "\{fun_name}(\{cur_in}, \{cur_out})"
   -- codegen function if needed
   when !(isNewFunction fun_name) $ do
     genFunction fun_name $ do
-      -- done -  pass argument end witness; or figure out how to handle that
-      -- TODO: special case static sized arguments for end witness passing?
       -- TODO: support multi parameter functions
       cur_arg <- newCursorName
       addCur cur_arg loc_in
@@ -600,6 +618,7 @@ fillDyn (FunApp {loc_in} fun_name fun arg) = do
       indent $ do
         emit "/* \{cur_arg} = \{loc_in} */"
         emit "/* \{cur_out} = \{loc} */"
+        tryAddStaticSizeEndWitness loc_in "fun arg"
         fillDyn (fun Var)
         emit "return \{!(getEndWitness loc)};"
       emit "}"
