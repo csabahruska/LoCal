@@ -3,6 +3,7 @@ module Dynamic
 import LoCal
 import Data.Maybe
 import Data.SortedMap
+import Data.SortedSet
 import Data.String
 import Control.Monad.State
 import Data.Primitives.Interpolation
@@ -128,6 +129,9 @@ record CGLocal where
   pointers    : SortedMap String LocVal
   funName     : String
   indentLevel : Nat
+  -- assertions
+  read        : SortedSet String
+  write       : SortedSet String
 
 record CG where
   constructor MkCG
@@ -144,6 +148,8 @@ emptyCGLocal = MkCGLocal
   , pointers    = empty
   , funName     = ""
   , indentLevel = 0
+  , read        = empty
+  , write       = empty
   }
 
 emptyCG : CG
@@ -156,11 +162,17 @@ emptyCG = MkCG
 
 M = StateT CG IO
 
-{-
-  IDEA:
-    do not use the Size argument of the LocAfter constructor,
-    instead every value should know it's size and provide it somehow to the locations that come after that
--}
+assertRead : Loc r -> M ()
+assertRead loc = do
+  modify {local.read $= insert (show loc)}
+
+assertWrite : Loc r -> M ()
+assertWrite loc = do
+  w <- gets (.local.write)
+  let key = show loc
+  when (contains key w) $ do
+    assert_total $ idris_crash $ "INTERNAL ERROR: multiple writes on \{loc}"
+  modify {local.write $= insert key}
 
 newId : M Int
 newId = state (\m => ({counter $= (+ 1)} m, m.counter))
@@ -180,8 +192,14 @@ localScope : M a -> M a
 localScope m = do
   locs <- gets (.local.locations)
   endws <- gets (.local.endwitness)
+  reads <- gets (.local.read)
+  writes <- gets (.local.write)
   res <- m
-  modify {local.locations := locs, local.endwitness := endws}
+  modify { local.locations  := locs
+         , local.endwitness := endws
+         , local.read       := reads
+         , local.write      := writes
+         }
   pure res
 
 emit : String -> M ()
@@ -359,17 +377,20 @@ fillDyn (UnBox v) = do
 
 fillDyn MkT0 = do
   lift $ putStrLn " ++ MkT0"
+  assertWrite loc
   _ <- genCursor loc
   addStaticSizeEndWitness loc "MkT0"
 
 fillDyn (MkI64 i) = do
   lift $ putStrLn " ++ MkI64 \{i}"
+  assertWrite loc
   cur <- genCursor loc
   emit "*(int*) \{cur} = \{i}; // MkI64"
   addStaticSizeEndWitness loc "MkI64"
 
 fillDyn (MkSTup2 a b) = do
   lift $ putStrLn " ++ MkSTup2"
+  assertWrite loc
   cur <- genCursor loc
   fillDyn a
   fillDyn b
@@ -377,6 +398,7 @@ fillDyn (MkSTup2 a b) = do
 
 fillDyn (MkRTup2 a b) = do
   lift $ putStrLn " ++ MkRTup2"
+  assertWrite loc
   cur <- genCursor loc -- cursor for RTup2, which is: indirection-to-snd/fst-endwitness + fst + snd
   fillDyn a
   unless (isStaticSize (getTy a)) $ do
@@ -396,6 +418,7 @@ fillDyn (MkRTup2 a b) = do
 
 fillDyn (MkPtr {loc_in} v) = do
   lift $ putStrLn " ++ MkPtr"
+  assertWrite loc
   --fillDyn v -- v is already generated, the CPS EDSL will fix this proper
   cur <- genCursor loc
   cur_in <- getCursor loc_in
@@ -409,6 +432,7 @@ fillDyn (MkPtr {loc_in} v) = do
 
 fillDyn (MkOffset {loc_in} v) = do
   lift $ putStrLn " ++ MkOffset"
+  assertWrite loc
   --fillDyn v -- v is already generated, the CPS EDSL will fix this proper
   cur <- genCursor loc
   cur_in <- getCursor loc_in
@@ -418,6 +442,7 @@ fillDyn (MkOffset {loc_in} v) = do
 
 fillDyn (DeRef {r_in, loc_in} v cont) = do
   lift $ putStrLn " ++ DeRef"
+  assertRead loc_in
   fillDyn v
   cur_in <- getCursor loc_in
   MkLocVal {r=r_val} loc_val <- getPointer loc_in
@@ -427,6 +452,7 @@ fillDyn (DeRef {r_in, loc_in} v cont) = do
 
 fillDyn (DeRefOffset {r_in, loc_in} v cont) = do
   lift $ putStrLn " ++ DeRefOffset"
+  assertRead loc_in
   fillDyn v
   cur_in <- getCursor loc_in
   MkLocVal {r=r_val} loc_val <- getPointer loc_in
@@ -439,6 +465,7 @@ fillDyn (DeRefOffset {r_in, loc_in} v cont) = do
 
 fillDyn (MkLeft a) = do
   lift $ putStrLn " ++ MkLeft"
+  assertWrite loc
   cur <- genCursor loc
   emit "*(char*) \{cur} = 0; // LEFT_TAG"
   fillDyn a
@@ -446,6 +473,7 @@ fillDyn (MkLeft a) = do
 
 fillDyn (MkRight b) = do
   lift $ putStrLn " ++ MkRight"
+  assertWrite loc
   cur <- genCursor loc
   emit "*(char*) \{cur} = 1; // RIGHT_TAG"
   fillDyn b
@@ -477,6 +505,9 @@ fillDyn (PrjSnd {a, b, loc_tup} tup cont) = do
 
 fillDyn (AddI64 {loc_in, loc_in2} a b) = do
   lift $ putStrLn " ++ AddI64"
+  assertRead loc_in
+  assertRead loc_in2
+  assertWrite loc
   fillDyn a
   fillDyn b
   cur <- genCursor loc
@@ -489,6 +520,9 @@ fillDyn (AddI64 {loc_in, loc_in2} a b) = do
 
 fillDyn (EqI64 {loc_in, loc_in2} a b) = do
   lift $ putStrLn " ++ EqI64"
+  assertRead loc_in
+  assertRead loc_in2
+  assertWrite loc
   fillDyn a
   fillDyn b
   cur <- genCursor loc
@@ -505,6 +539,8 @@ fillDyn (EqI64 {loc_in, loc_in2} a b) = do
 
 fillDyn (PrintI64 {loc_in} a) = do
   lift $ putStrLn " ++ PrintI64"
+  assertRead loc_in
+  assertWrite loc
   fillDyn a
   cur <- genCursor loc
   cur_in <- getCursor loc_in
@@ -514,6 +550,8 @@ fillDyn (PrintI64 {loc_in} a) = do
 
 fillDyn (PrintValue {loc_in} a) = do
   lift $ putStrLn " ++ PrintValue"
+  assertRead loc_in
+  assertWrite loc
   fillDyn a
   cur <- genCursor loc
   cur_in <- getCursor loc_in
@@ -561,7 +599,7 @@ fillDyn (CaseEither {scrut_loc} scrut cont_left cont_right) = do
   emit "char* \{cur_tag_end_tmp} = 0; // uninitalized"
 
   emit "if (*(char*) \{cur_tag} == 0) { // LEFT"
-  scrut_ew_left <- indent $ localScope $ do
+  (scrut_ew_left, left_cglocal) <- indent $ localScope $ do
     let expL = cont_left Var
     fillDyn expL
     emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expL)};"
@@ -569,9 +607,9 @@ fillDyn (CaseEither {scrut_loc} scrut cont_left cont_right) = do
     case scrut_ew of
       Nothing => pure ()
       Just ew => emit "\{cur_tag_end_tmp} = \{ew};"
-    pure $ isJust scrut_ew
+    pure (isJust scrut_ew, !(gets (.local)))
   emit "} else { // RIGHT"
-  scrut_ew_right <- indent $ localScope $ do
+  (scrut_ew_right, right_cglocal) <- indent $ localScope $ do
     let expR = cont_right Var
     fillDyn expR
     emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expR)};"
@@ -579,8 +617,11 @@ fillDyn (CaseEither {scrut_loc} scrut cont_left cont_right) = do
     case scrut_ew of
       Nothing => pure ()
       Just ew => emit "\{cur_tag_end_tmp} = \{ew};"
-    pure $ isJust scrut_ew
+    pure (isJust scrut_ew, !(gets (.local)))
   emit "}"
+  modify { local.read   $= union (intersection left_cglocal.read  right_cglocal.read)
+         , local.write  $= union (intersection left_cglocal.write right_cglocal.write)
+         }
   defineEndWitness loc cur_end_tmp
   -- add end-witness for scrut_loc ; this can be done when both left and right eliminator has it
   when (scrut_ew_left && scrut_ew_right) $ do
@@ -588,6 +629,8 @@ fillDyn (CaseEither {scrut_loc} scrut cont_left cont_right) = do
 
 fillDyn (Copy {r_in, loc_in} _) = do
   lift $ putStrLn " ++ Copy"
+  assertRead loc_in
+  assertWrite loc
   cur_src <- getCursor loc_in
   cur_dst <- genCursor loc
   cur_src_end <- getEndWitness loc_in

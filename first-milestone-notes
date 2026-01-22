@@ -3,9 +3,6 @@ date: 2026-01-21
 PROBLEM: end witness availability is not tracked by the type system, neither the end-witness requirement property
 TODO/FUTURE WORK: extend the type system to track these too
 
-TODO:
-  - add check for duplicate codegen ; single loc should be written only once and can be read multiple times
-
 what works:
   - location calculus EDSL model where the location are inferred by the idris type elaborator
   - sharing and indirection support
