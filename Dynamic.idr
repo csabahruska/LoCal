@@ -21,27 +21,6 @@ public export
 DecEq Region where
   decEq (MkRegion x) (MkRegion y) = decEqCong $ decEq x y
 
-data Effect = Read | Write | Allocated | Traversed
-
-ordTagEffect : Effect -> Int
-ordTagEffect Read       = 0
-ordTagEffect Write      = 1
-ordTagEffect Allocated  = 2
-ordTagEffect Traversed  = 3
-
-Eq Effect where a == b = ordTagEffect a == ordTagEffect b
-Ord Effect where compare a b = compare (ordTagEffect a) (ordTagEffect b)
-
-showEffect : Effect -> String
-showEffect = \case
-  Read      => "Read"
-  Write     => "Write"
-  Allocated => "Allocated"
-  Traversed => "Traversed"
-
-Show Effect where show = showEffect
-Interpolation Effect where interpolate = show
-
 showRegion : Region -> String
 showRegion (MkRegion i) = "MkRegion \{i}"
 
@@ -108,19 +87,6 @@ getStaticSize = \case
       else Nothing
   Box _ => Nothing
 
-{-
-data LocItem : Type where
-  MkLocItem : Loc r t -> LocItem
-
-RevLoc = List LocItem
---RevLoc2 = List (r : Region ** (t : Ty ** Loc r t))
-
-mkRevLoc : Loc r t -> RevLoc
-mkRevLoc loc = case loc of
-  LocStart _ _ => [MkLocItem loc]
-  LocAfter _ l => mkRevLoc l ++ [MkLocItem loc]
-  LocAfterTag _ _ l => mkRevLoc l ++ [MkLocItem loc]
--}
 getLocTy : Loc r -> Ty
 getLocTy (LocStart t _) = t
 getLocTy (LocAfter t _) = t
@@ -161,7 +127,6 @@ record CGLocal where
   constructor MkCGLocal
   locations   : SortedMap String String
   endwitness  : SortedMap String String
-  effects     : SortedMap String (SortedSet Effect)
   pointers    : SortedMap String LocVal
   funName     : String
   indentLevel : Nat
@@ -178,7 +143,6 @@ emptyCGLocal : CGLocal
 emptyCGLocal = MkCGLocal
   { locations   = empty
   , endwitness  = empty
-  , effects     = empty
   , pointers    = empty
   , funName     = ""
   , indentLevel = 0
@@ -265,21 +229,6 @@ getPointer loc = do
   let Just lv = lookup (show loc) ptrs
         | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing LocVal for \{loc}"
   pure lv
-
--- effect handling
-addEffect : (loc : Loc r) -> Effect -> M ()
-addEffect _ _ = pure () -- TODO
-
-reqEffect : (loc : Loc r) -> Effect -> M ()
-reqEffect _ _ = pure () -- TODO
-
-getEffect : (loc : Loc r) -> M (SortedSet Effect)
-getEffect loc = do
-  effs <- gets (.local.effects)
-  let Just eff = lookup (show loc) effs
-        | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc cursor for \{loc}\n effect map: \{show effs}"
-  pure eff
-
 
 -- IDEA: use Loc values in Map as keys via its show function
 
