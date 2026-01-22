@@ -98,8 +98,7 @@ data Loc : (r : Region) -> Type where
 public export
 data Exp : (t : Ty) -> (loc : Loc r) -> Type where
 
-  -- Q: when to introduce new regions?
-  -- A: for intermediate values
+  -- Q: when to introduce new regions? A: for intermediate values
   LetRegion : (Region -> Exp t loc) -> Exp t loc
   LetRegionValue : {t : _} -> {a : _} -> {loc : Loc r} -> (r : Region) -> Exp t (LocStart t r) -> (Exp t (LocStart t r) -> Exp a loc) -> Exp a loc
 

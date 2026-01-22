@@ -3,6 +3,9 @@ date: 2026-01-21
 PROBLEM: end witness availability is not tracked by the type system, neither the end-witness requirement property
 TODO/FUTURE WORK: extend the type system to track these too
 
+TODO:
+  - add check for duplicate codegen ; single loc should be written only once and can be read multiple times
+
 what works:
   - location calculus EDSL model where the location are inferred by the idris type elaborator
   - sharing and indirection support
@@ -17,9 +20,11 @@ limitations:
   - only I64 primitive type
 
 FUTURE WORK:
-  - end-witness tracking in the type system
+  - end-witness tracking in the type system ; functions return end-witnesses of the traversed input values
+      ideas: a) use linear variables b) index Exp with traverse effect environment
   - sub byte addressing
   - pack multiple tags into a byte or machine word
   - multi parameter functions
   - more primitive types and primops, e.g. arbitrary sized words, byte-buffer
   - refactor to CPS style EDSL to prevent codegen duplications
+  - index Loc with Ty for more safety
