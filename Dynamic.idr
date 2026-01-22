@@ -1,10 +1,8 @@
 module Dynamic
 
 import LoCal
-import Data.List.Elem
 import Data.Maybe
 import Data.SortedMap
-import Data.SortedSet
 import Data.String
 import Control.Monad.State
 import Data.Primitives.Interpolation

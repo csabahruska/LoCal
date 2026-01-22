@@ -1,7 +1,5 @@
 module LoCal
 
-import Data.List.Elem
-
 public export
 data Ty : Type where
   T0 : Ty
@@ -101,15 +99,8 @@ public export
 data Exp : (t : Ty) -> (loc : Loc r) -> Type where
 
   -- Q: when to introduce new regions?
+  -- A: for intermediate values
   LetRegion : (Region -> Exp t loc) -> Exp t loc
-  -- TODO: add AllocInNewRegion primitive
-
-  -- Q: not needed? A: Right, let is not needed, use LetRegionValue instead
-  --Let : {r_in : _} -> {t_in : _} -> {loc_in : Loc r_in t_in} -> Exp t_in loc_in -> (Exp t_in loc_in -> Exp t loc) -> Exp t loc
-
-  -- Q: not needed? A: Not needed, use meta language let because every value resides only one location
-  --LetSubValue : {loc_in : Loc r t_in} -> {loc : Loc r t} -> Exp t_in loc_in -> (Exp t_in loc_in -> Exp t loc) -> Exp t loc
-
   LetRegionValue : {t : _} -> {a : _} -> {loc : Loc r} -> (r : Region) -> Exp t (LocStart t r) -> (Exp t (LocStart t r) -> Exp a loc) -> Exp a loc
 
   -- primops
@@ -184,12 +175,6 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
 
   -- serial access tup2
   -- TODO: this is not the right model ; traverse effect checking is needed anyways
-  {-
-  CaseSTup2 : {r : _} -> {a, b, c, d : Ty} -> {loc : Loc r _} -> {loc_out1 : Loc r_out1 _} -> {loc_out2 : Loc r_out2 _} -> Exp (STup2 a b) loc ->
-              let locFst = LocAfterTag "STup2" a loc in
-              let locSnd = LocAfter b locFst in
-              (Exp a locFst -> Exp c loc_out1) -> (Exp b locSnd -> Exp c loc_out1 -> Exp d loc_out2) -> Exp d loc_out2
-  -}
   CaseSTup2 : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup} -> {loc_out : Loc r_out} -> Exp (STup2 a b) loc_tup ->
               let locFst = LocAfterTag "STup2" a loc_tup in
               let locSnd = LocAfter b locFst in

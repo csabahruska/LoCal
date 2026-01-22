@@ -1,5 +1,5 @@
 module Examples2
-import Data.List.Elem
+
 import LoCal
 import Dynamic
 
