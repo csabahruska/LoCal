@@ -180,7 +180,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
               (Exp a locFst -> Exp b locSnd -> Exp c loc_out) -> Exp c loc_out
 {-
   IDEA:
-    - model custsors and end witnesses
+    - model cursors and end witnesses
     - sizeof handling
       + can generate end-witness at compile time from Ty                        ; compile time = end-witness value
       + can genetrate end-witness producing runtime function at compile time    ; runtime      = end-witness function : value -> end-witness
@@ -199,7 +199,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
            (Exp t_arg loc_in -> Exp res loc_out) -> Exp t_arg loc_in -> Exp res loc_out
 
   -- internal
-  Var : {-{a : _} -> {r : _} -> {loc : Loc r a} ->-} Exp a loc
+  Var : Exp a loc
 
 public export
 data Program : Type where
@@ -209,7 +209,7 @@ data Program : Type where
 
 {-
   TODO:
-    - write buffer based interpreter
+    SKIP - write buffer based interpreter
     done - write C backend
     done - write example for function call
   Q: should we distinguish register and memory values ; ref or immediate value?
