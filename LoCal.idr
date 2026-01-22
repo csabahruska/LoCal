@@ -9,10 +9,11 @@ data Ty : Type where
   RTup2 : Ty -> Ty -> Ty   -- random access, O(1) access of snd
   Either : Ty -> Ty -> Ty
   I64 : Ty
-  Ind : Ty -> Ty -- raw pointer ; no tag ; just the location data
+  Offset : Ty -> Ty -- signed pointer offset value
+  Ptr : Ty -> Ty -- raw pointer ; no tag ; just the location data
   -- IDEA: Offset - region local ; Ptr - cross region
   -- recursive type support
-  Box : {x : (Lazy Ty)} -> {xs : List (Lazy Ty)} -> Elem x xs -> Ty
+  Box : Lazy Ty -> Ty
 
 {-
   INSIGHT:
@@ -117,16 +118,17 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
   -- prints the buffer content at the location in hexadecimal ; requires full traversal effect on the argument, so the end-witness should be available
   PrintValue : {r_in : _} -> {t : _} -> {loc_in : Loc r_in} -> Exp t loc_in -> Exp T0 loc
 
-  -- indirection
-  MkInd : {loc_in : Loc r} -> {loc_ind : Loc r} -> Exp t loc_in -> Exp (Ind t) loc_ind -- within the same region
-  DeRef : {loc_in : Loc r} -> {loc_ind : Loc r} -> Exp (Ind t) loc_ind -> Exp t loc_in -- within the same region
+  -- indirection, within same region
+  MkOffset    : {loc_in : Loc r} -> {loc : Loc r} -> Exp t loc_in -> Exp (Offset t) loc
+  DeRefOffset : {t : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp (Offset t) loc_in -> ((loc_val : Loc r_in) -> Exp t loc_val -> Exp result loc) -> Exp result loc
 
-  MkIndLong : {r_in : _} -> {loc_in : Loc r_in} -> Exp t loc_in -> Exp (Ind t) loc_ind      -- cross region
-  DeRefLong : {r_in : _} -> {loc_in : Loc r_in} -> Exp (Ind t) loc_ind -> Exp t loc_in      -- cross region
+  -- indirection, cross region
+  MkPtr : {r_in : _} -> {loc_in : Loc r_in} -> Exp t loc_in -> Exp (Ptr t) loc
+  DeRef : {t : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp (Ptr t) loc_in -> ((r_val : _) -> (loc_val : Loc r_val) -> Exp t loc_val -> Exp result loc) -> Exp result loc
 
   -- boxing
-  MkBox : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc : Loc r} -> Exp x loc -> Exp (Box i) loc
-  UnBox : {x : Lazy Ty} -> {xs : List (Lazy Ty)} -> {auto i : Elem x xs} -> {r : _} -> {loc : Loc r} -> Exp (Box i) loc -> Exp x loc
+  MkBox : {x : _} -> {r : _} -> {loc : Loc r} -> Exp x loc -> Exp (Box x) loc
+  UnBox : {x : _} -> {r : _} -> {loc : Loc r} -> Exp (Box x) loc -> Exp x loc
 
   -- to copy values cross region ; requires full traversal effect on the argument, so the end-witness should be available
   Copy : {r_in : _} -> {loc_in : Loc r_in} -> Exp t loc_in -> Exp t loc
@@ -188,7 +190,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
               let locSnd = LocAfter b locFst in
               (Exp a locFst -> Exp c loc_out1) -> (Exp b locSnd -> Exp c loc_out1 -> Exp d loc_out2) -> Exp d loc_out2
   -}
-  CaseSTup2 : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r} -> {loc_out : Loc r_out} -> Exp (STup2 a b) loc_tup ->
+  CaseSTup2 : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup} -> {loc_out : Loc r_out} -> Exp (STup2 a b) loc_tup ->
               let locFst = LocAfterTag "STup2" a loc_tup in
               let locSnd = LocAfter b locFst in
               (Exp a locFst -> Exp b locSnd -> Exp c loc_out) -> Exp c loc_out
