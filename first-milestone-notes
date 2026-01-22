@@ -1,0 +1,25 @@
+date: 2026-01-21
+
+PROBLEM: end witness availability is not tracked by the type system, neither the end-witness requirement property
+TODO/FUTURE WORK: extend the type system to track these too
+
+what works:
+  - location calculus EDSL model where the location are inferred by the idris type elaborator
+  - sharing and indirection support
+  - c backend
+  - ADTs are modeled as Sum Of Products (SOP)
+  - recursive functions
+  - recursive data types
+
+limitations:
+  - functions have single arguments
+  - byte sized tags ; either should have one bit sized tag
+  - only I64 primitive type
+
+FUTURE WORK:
+  - end-witness tracking in the type system
+  - sub byte addressing
+  - pack multiple tags into a byte or machine word
+  - multi parameter functions
+  - more primitive types and primops, e.g. arbitrary sized words, byte-buffer
+  - refactor to CPS style EDSL to prevent codegen duplications
