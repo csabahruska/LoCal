@@ -11,6 +11,15 @@ import Data.Primitives.Interpolation
 import Control.ANSI
 import System.File
 import System
+import Decidable.Equality
+
+export
+Injective MkRegion where
+  injective Refl = Refl
+
+public export
+DecEq Region where
+  decEq (MkRegion x) (MkRegion y) = decEqCong $ decEq x y
 
 data Effect = Read | Write | Allocated | Traversed
 
@@ -46,8 +55,9 @@ showTy t = case t of
   RTup2 a b   => "RTup2 (\{showTy a}) (\{showTy b})"
   Either a b  => "Either (\{showTy a}) (\{showTy b})"
   I64         => "I64"
-  Ind a       => "Ind (\{showTy a})"
-  Box i       => "Box \{elemToNat i}"
+  Offset a    => "Offset (\{showTy a})"
+  Ptr a       => "Ptr (\{showTy a})"
+  Box i       => "Box"
 
 Show Ty where show = showTy
 Interpolation Ty where interpolate = show
@@ -80,7 +90,8 @@ getStaticSize : Ty -> Maybe Int
 getStaticSize = \case
   T0    => Just 0
   I64   => pure 8
-  Ind _ => pure 8
+  Offset _ => pure 8
+  Ptr _ => pure 8
   STup2 a b => do
     sa <- getStaticSize a
     sb <- getStaticSize b
@@ -141,6 +152,9 @@ getStaticIndex = \case
     i <- getStaticIndex l
     Just (1 + i)
 
+data LocVal : Type where
+  MkLocVal : {r : Region} -> (loc : Loc r) -> LocVal
+
 -- codegen monad
 
 record CGLocal where
@@ -148,6 +162,7 @@ record CGLocal where
   locations   : SortedMap String String
   endwitness  : SortedMap String String
   effects     : SortedMap String (SortedSet Effect)
+  pointers    : SortedMap String LocVal
   funName     : String
   indentLevel : Nat
 
@@ -164,6 +179,7 @@ emptyCGLocal = MkCGLocal
   { locations   = empty
   , endwitness  = empty
   , effects     = empty
+  , pointers    = empty
   , funName     = ""
   , indentLevel = 0
   }
@@ -240,6 +256,15 @@ getLoc {l} _ = l
 addCur : String -> Loc r -> M ()
 addCur c l = modify {local.locations $= insert (show l) c}
 
+addPointer : LocVal -> Loc r -> M ()
+addPointer lv l = modify {local.pointers $= insert (show l) lv}
+
+getPointer : (loc : Loc r) -> M LocVal
+getPointer loc = do
+  ptrs <- gets (.local.pointers)
+  let Just lv = lookup (show loc) ptrs
+        | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing LocVal for \{loc}"
+  pure lv
 
 -- effect handling
 addEffect : (loc : Loc r) -> Effect -> M ()
@@ -369,17 +394,19 @@ maybeSetEndWitness loc value = do
     Nothing => pure () -- todo
     Just ew => modify {local.endwitness $= insert (show loc) ew}
 
+-- TODO: rewrite to continuation passig style EDSL to avoid duplicated codegen, i.e. 'let i = MkI64 1 in MkRTup i (MkPtr i)' will set the value of i to 1 twice
+
 partial fillDyn : {r : _ } -> {t : _ } -> {loc : Loc r} -> Exp t loc -> M ()
 
 -- HINT: no end-witness definition is needed for static sized types
 
-fillDyn (MkBox {i} v) = do
-  lift $ putStrLn " ++ MkBox \{elemToNat i}"
+fillDyn (MkBox v) = do
+  lift $ putStrLn " ++ MkBox"
   fillDyn v
   -- inherits end-witness
 
-fillDyn (UnBox {i} {x} v) = do
-  lift $ putStrLn " ++ UnBox \{elemToNat i}"
+fillDyn (UnBox v) = do
+  lift $ putStrLn " ++ UnBox"
   fillDyn v
   -- inherits end-witness
 
@@ -391,7 +418,7 @@ fillDyn MkT0 = do
 fillDyn (MkI64 i) = do
   lift $ putStrLn " ++ MkI64 \{i}"
   cur <- genCursor loc
-  emit "*(int*) \{cur} = \{i};"
+  emit "*(int*) \{cur} = \{i}; // MkI64"
   addStaticSizeEndWitness loc "MkI64"
 
 fillDyn (MkSTup2 a b) = do
@@ -406,7 +433,7 @@ fillDyn (MkRTup2 a b) = do
   cur <- genCursor loc -- cursor for RTup2, which is: indirection-to-snd/fst-endwitness + fst + snd
   fillDyn a
   unless (isStaticSize (getTy a)) $ do
-    emit "*(int*) \{cur} = \{!(getEndWitness $ getLoc a)} - \{cur};"
+    emit "*(int*) \{cur} = \{!(getEndWitness $ getLoc a)} - \{cur}; // RTup2 fst size in bytes"
   fillDyn b
   updateEndWitnessTo loc b -- error if missing
 
@@ -420,9 +447,9 @@ fillDyn (MkRTup2 a b) = do
   TODO: track effects for locations
 -}
 
-fillDyn (MkInd {loc_in} v) = do
-  lift $ putStrLn " ++ MkInd"
-  fillDyn v
+fillDyn (MkPtr {loc_in} v) = do
+  lift $ putStrLn " ++ MkPtr"
+  --fillDyn v -- v is already generated, the CPS EDSL will fix this proper
   cur <- genCursor loc
   cur_in <- getCursor loc_in
   -- TODO: support forward pointers
@@ -430,15 +457,38 @@ fillDyn (MkInd {loc_in} v) = do
   -- A: it is possible to compute that from loctions
   --  TODO: write such a function
   emit "*(char**) \{cur} = \{cur_in};"
-  addStaticSizeEndWitness loc "MkInd"
+  addPointer (MkLocVal loc_in) loc
+  addStaticSizeEndWitness loc "MkPtr"
 
-fillDyn (MkIndLong {loc_in} v) = do
-  lift $ putStrLn " ++ MkIndLong"
-  fillDyn v
+fillDyn (MkOffset {loc_in} v) = do
+  lift $ putStrLn " ++ MkOffset"
+  --fillDyn v -- v is already generated, the CPS EDSL will fix this proper
   cur <- genCursor loc
   cur_in <- getCursor loc_in
-  emit "*(char**) \{cur} = \{cur_in};"
-  addStaticSizeEndWitness loc "MkIndLong"
+  emit "*(int*) \{cur} = \{cur_in} - \{cur};"
+  addPointer (MkLocVal loc_in) loc
+  addStaticSizeEndWitness loc "MkOffset"
+
+fillDyn (DeRef {r_in, loc_in} v cont) = do
+  lift $ putStrLn " ++ DeRef"
+  fillDyn v
+  cur_in <- getCursor loc_in
+  MkLocVal {r=r_val} loc_val <- getPointer loc_in
+  cur <- genCursor loc_val
+  emit "\{cur} = *(char**)\{cur_in}; // DeRef"
+  fillDyn (cont r_val loc_val Var)
+
+fillDyn (DeRefOffset {r_in, loc_in} v cont) = do
+  lift $ putStrLn " ++ DeRefOffset"
+  fillDyn v
+  cur_in <- getCursor loc_in
+  MkLocVal {r=r_val} loc_val <- getPointer loc_in
+  case decEq r_val r_in of
+    No _ => assert_total $ idris_crash $ "INTERNAL ERROR: DeRefOffset region mismatch \{r_val} should be \{r_in}"
+    Yes Refl => do
+      cur <- genCursor loc_val
+      emit "\{cur} = \{cur_in} + *(int*)\{cur_in}; // DeRefOffset"
+      fillDyn (cont loc_val Var)
 
 fillDyn (MkLeft a) = do
   lift $ putStrLn " ++ MkLeft"
@@ -539,9 +589,18 @@ fillDyn (LetRegionValue {a,t} r v cont) = do
   tryAddStaticSizeEndWitness loc_start "LetRegionValue"
   fillDyn {t=a} (cont Var)
 
-  -- TODO: add DeRef
-  -- TODO: add CaseSTup2
-  -- TODO: add DeRefLong
+fillDyn (CaseSTup2 {a, b, loc_tup} tup cont) = do
+  lift $ putStrLn " ++ CaseSTup2"
+  fillDyn tup
+  fillDyn (cont Var Var)
+  -- create tup end-witness
+  let locFst = LocAfterTag "STup2" a loc_tup
+      locSnd = LocAfter b locFst
+  _ <- genCursor locSnd
+  -- try to set end-witness for STup2 if snd was traversed
+  maybeSetEndWitness loc_tup locSnd
+
+--TODO: example for stup2 where an int pair is created and passed to a function that prints the fst and snd ; also create an error case that prints only the snd or snd then fst
 
 fillDyn (CaseEither {scrut_loc} scrut cont_left cont_right) = do
   lift $ putStrLn " ++ CaseEither"
@@ -609,6 +668,7 @@ fillDyn (FunApp {loc_in} fun_name fun arg) = do
   when !(isNewFunction fun_name) $ do
     genFunction fun_name $ do
       -- TODO: support multi parameter functions
+      -- TODO: pass arg's pointers entry if any
       cur_arg <- newCursorName
       addCur cur_arg loc_in
       cur_out <- newCursorName
@@ -634,6 +694,7 @@ c_header = """
   }
 
   void print_hex(const unsigned char *buf, size_t len) {
+    printf("%ld bytes\\n", len);
     for (size_t i = 0; i < len; i++) {
         // %02x: 0-padded, 2-character minimum, lowercase hex
         printf("%02x ", buf[i]);
@@ -690,12 +751,12 @@ compileProgram name (Main e) = do
     - add effect tracking to locations: ALLOC, WRITE, READ
     - check the required effects during codegen
     - support forward pointers
-    - separate offsets and pointers
-    - add functions
+    done - separate offsets and pointers
+    done - add functions
     SKIP - write full value traversal checker function, which would tell the unaccessed locations ; not possible in LoCal RTup2/STup2 is to make this explicit
     - add high level language and map it to local
       + for first use fully pointer based approach with a bump allocator region allocator
-    - support dec/def types
+    done - support dec/def types, used Box instead
 
   Q: would it be enough in practice if only backward pointers would be supported?
   Q: how is atomicity and value sharing is related? (value representation and value indirection)
