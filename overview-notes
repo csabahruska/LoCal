@@ -1,0 +1,9 @@
+short intro for the serialized representation and reference for the papers and the gibbom copmpiler
+
+for the details read the location calculus paper
+
+my goal description, my design: idris edsl instead of a standalone frontend and type checker
+also, future plans to use the edsl local as a compiler IR and also use staging when will available
+also plans for low level codegen, with memory layout control. memory layout control is needed for many things, i.e. SIMD vectorisation
+
+benefits of the edsl approach with dependent types: everything is simpler, faster iterations of experiments, cleaner code focused on the domain only
