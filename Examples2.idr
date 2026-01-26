@@ -466,7 +466,7 @@ test_14 = Main $
       LetRegionValue r (PrintValue v) $ \_ =>
       PrjFst v $ \i2 =>
       PrjSnd v $ \i3 =>
-      DeRef i3 $ \_,_,i4 =>
+      DeRefPtr i3 $ \_,_,i4 =>
       PrintI64 i4
 
 test_15 : Program

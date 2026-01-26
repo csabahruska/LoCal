@@ -2,16 +2,16 @@ module LoCal
 
 public export
 data Ty : Type where
-  T0 : Ty
-  STup2 : Ty -> Ty -> Ty   -- serial access only, fst then snd
-  RTup2 : Ty -> Ty -> Ty   -- random access, O(1) access of snd
-  Either : Ty -> Ty -> Ty
-  I64 : Ty
-  Offset : Ty -> Ty -- signed pointer offset value
-  Ptr : Ty -> Ty -- raw pointer ; no tag ; just the location data
+  T0      : Ty
+  STup2   : Ty -> Ty -> Ty   -- serial access only, fst then snd
+  RTup2   : Ty -> Ty -> Ty   -- random access, O(1) access of snd
+  Either  : Ty -> Ty -> Ty
+  I64     : Ty
+  Offset  : Ty -> Ty -- signed pointer offset value
+  Ptr     : Ty -> Ty -- raw pointer ; no tag ; just the location data
   -- IDEA: Offset - region local ; Ptr - cross region
   -- recursive type support
-  Box : Lazy Ty -> Ty
+  Box     : Lazy Ty -> Ty
 
 {-
   INSIGHT:
@@ -113,8 +113,8 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
   DeRefOffset : {t : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp (Offset t) loc_in -> ((loc_val : Loc r_in) -> Exp t loc_val -> Exp result loc) -> Exp result loc
 
   -- indirection, cross region
-  MkPtr : {r_in : _} -> {loc_in : Loc r_in} -> Exp t loc_in -> Exp (Ptr t) loc
-  DeRef : {t : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp (Ptr t) loc_in -> ((r_val : _) -> (loc_val : Loc r_val) -> Exp t loc_val -> Exp result loc) -> Exp result loc
+  MkPtr    : {r_in : _} -> {loc_in : Loc r_in} -> Exp t loc_in -> Exp (Ptr t) loc
+  DeRefPtr : {t : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp (Ptr t) loc_in -> ((r_val : _) -> (loc_val : Loc r_val) -> Exp t loc_val -> Exp result loc) -> Exp result loc
 
   -- boxing
   MkBox : {x : _} -> {r : _} -> {loc : Loc r} -> Exp x loc -> Exp (Box x) loc
@@ -348,7 +348,7 @@ fn = \a => \b => b
         gibbon allocates garbage into a separate region, and it puts the output into the same region
       - how will my interpreter handle this?
   TODO:
-    done - add Ind eliminator: DeRef
+    done - add Ind eliminator: DeRefPtr
     Q: when a pointer is a forward reference then is it possile that it will be dereferred before it is written?
     A: yes, which is wrong.
       Q: how to avoid this situation? is it possible to track effects in types?
@@ -357,6 +357,6 @@ fn = \a => \b => b
   TODO:
     done - add STup2 and RTup2 and their eliminators ; this solves the traversal problem by making it expicit and correct by construction
     - add example for STup2
-    - add static or dynamic assertion to MkInd to check that the referred value is written ; this guarantees the correctness of DeRef
+    - add static or dynamic assertion to MkInd to check that the referred value is written ; this guarantees the correctness of DeRefPtr
       every function argument must be fully written, every return value must be fully written
 -}

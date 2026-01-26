@@ -440,14 +440,14 @@ fillDyn (MkOffset {loc_in} v) = do
   addPointer (MkLocVal loc_in) loc
   addStaticSizeEndWitness loc "MkOffset"
 
-fillDyn (DeRef {r_in, loc_in} v cont) = do
-  lift $ putStrLn " ++ DeRef"
+fillDyn (DeRefPtr {r_in, loc_in} v cont) = do
+  lift $ putStrLn " ++ DeRefPtr"
   assertRead loc_in
   fillDyn v
   cur_in <- getCursor loc_in
   MkLocVal {r=r_val} loc_val <- getPointer loc_in
   cur <- genCursor loc_val
-  emit "\{cur} = *(char**)\{cur_in}; // DeRef"
+  emit "\{cur} = *(char**)\{cur_in}; // DeRefPtr"
   fillDyn (cont r_val loc_val Var)
 
 fillDyn (DeRefOffset {r_in, loc_in} v cont) = do
