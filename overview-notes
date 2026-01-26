@@ -6,4 +6,8 @@ my goal description, my design: idris edsl instead of a standalone frontend and 
 also, future plans to use the edsl local as a compiler IR and also use staging when will available
 also plans for low level codegen, with memory layout control. memory layout control is needed for many things, i.e. SIMD vectorisation
 
-benefits of the edsl approach with dependent types: everything is simpler, faster iterations of experiments, cleaner code focused on the domain only
+benefits of the edsl approach with dependent types: everything is simpler, faster experiment iterations, cleaner code focused on the domain only
+
+what works
+
+what is planned as future work
