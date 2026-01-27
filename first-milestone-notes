@@ -17,11 +17,12 @@ limitations:
   - only I64 primitive type
 
 FUTURE WORK:
+  - refactor to CPS style EDSL to prevent codegen duplications
   - end-witness tracking in the type system ; functions return end-witnesses of the traversed input values
       ideas: a) use linear variables b) index Exp with traverse effect environment
+  - index Loc with Ty for more safety
+
   - sub byte addressing
   - pack multiple tags into a byte or machine word
   - multi parameter functions
   - more primitive types and primops, e.g. arbitrary sized words, byte-buffer
-  - refactor to CPS style EDSL to prevent codegen duplications
-  - index Loc with Ty for more safety
