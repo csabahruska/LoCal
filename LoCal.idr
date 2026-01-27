@@ -1,5 +1,7 @@
 module LoCal
 
+import Data.List.Elem
+
 public export
 data Ty : Type where
   T0      : Ty
@@ -95,19 +97,22 @@ data Loc : (r : Region) -> Type where
     - implicit sharing: use coercions for automatic DUP insertion
 -}
 
-public export
-data Exp : (t : Ty) -> (loc : Loc r) -> Type where
+data EndWitness : Type where
+  EW : {r : Region} -> (loc : Loc r) -> EndWitness
 
+public export
+data Exp : (t : Ty) -> (loc : Loc r) -> (ews : List EndWitness) -> Type where
+{-
   -- Q: when to introduce new regions? A: for intermediate values
   LetRegion : (Region -> Exp t loc) -> Exp t loc
   LetRegionValue : {t : _} -> {a : _} -> {loc : Loc r} -> (r : Region) -> Exp t (LocStart t r) -> (Exp t (LocStart t r) -> Exp a loc) -> Exp a loc
-
+-}
   -- primops
-  PrintI64 : {r_in : _} -> {loc_in : Loc r_in} -> Exp I64 loc_in -> Exp T0 loc
+  PrintI64 : {r_in : _} -> {loc_in : Loc r_in} -> Exp I64 loc_in ew_in -> Exp T0 loc ([EW loc, EW loc_in] ++ ew_in)
 
   -- prints the buffer content at the location in hexadecimal ; requires full traversal effect on the argument, so the end-witness should be available
-  PrintValue : {r_in : _} -> {t : _} -> {loc_in : Loc r_in} -> Exp t loc_in -> Exp T0 loc
-
+  PrintValue : {r_in : _} -> {t : _} -> {loc_in : Loc r_in} -> Exp t loc_in ew_in -> {auto 0 prf : Elem (EW loc_in) ew_in} -> Exp T0 loc ([EW loc] ++ ew_in)
+{-
   -- indirection, within same region
   MkOffset    : {loc_in : Loc r} -> {loc : Loc r} -> Exp t loc_in -> Exp (Offset t) loc
   DeRefOffset : {t : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp (Offset t) loc_in -> ((loc_val : Loc r_in) -> Exp t loc_val -> Exp result loc) -> Exp result loc
@@ -122,15 +127,16 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
 
   -- to copy values cross region ; requires full traversal effect on the argument, so the end-witness should be available
   Copy : {r_in : _} -> {loc_in : Loc r_in} -> Exp t loc_in -> Exp t loc
-
+-}
   -- primitive values
-  MkT0 : Exp T0 loc
-  MkI64 : Int -> Exp I64 loc
-
+  MkT0 : Exp T0 loc [EW loc]
+  MkI64 : Int -> Exp I64 loc [EW loc]
+  --MkI64' : Int -> Exp I64 loc []
+{-
   -- I64 primops
   AddI64 : {r_in : _} -> {r_in2 : _} -> {loc_in : Loc r_in} -> {loc_in2 : Loc r_in2} -> Exp I64 loc_in -> Exp I64 loc_in2 -> Exp I64 loc
   EqI64  : {r_in : _} -> {r_in2 : _} -> {loc_in : Loc r_in} -> {loc_in2 : Loc r_in2} -> Exp I64 loc_in -> Exp I64 loc_in2 -> Exp (Either T0 T0) loc
-
+-}
   -- value shapes, ADT can be modeled with these
   {-
     MkTup2 is the only place that introduces after relation between locations
@@ -139,11 +145,12 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
       - the Exp size could be used to define the region size also
   -}
 
-  MkSTup2 : {a, b : Ty} -> {loc : Loc r} ->
+  MkSTup2 : {a, b : Ty} -> {ews_fst, ews_snd : _} -> {loc : Loc r} ->
     let locFst = LocAfterTag "STup2" a loc in
     let locSnd = LocAfter b locFst in
-    Exp a locFst -> Exp b locSnd -> Exp (STup2 a b) loc
-
+    Exp a locFst ews_fst -> {auto 0 prf : Elem (EW locFst) ews_fst} ->
+    Exp b locSnd ews_snd -> Exp (STup2 a b) loc (ews_fst ++ ews_snd)
+{-
   MkRTup2 : {a, b : Ty} -> {loc : Loc r} ->
     let locFst = LocAfterTag "RTup2" a loc in
     let locSnd = LocAfter b locFst in
@@ -156,12 +163,13 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
   MkRight : {a, b : Ty} -> {loc : Loc r} ->
     let locArg = LocAfterTag "Right" b loc in
     Exp b locArg -> Exp (Either a b) loc
-
+-}
 {-
   TODO:
     every data access needs to be tested to Ind and do the dereference for it
     INSIGHT: sharing poisons code, because requires interpretation
 -}
+{-
   -- random access tup2
   PrjFst : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup} -> {loc_out : Loc r_out} -> Exp (RTup2 a b) loc_tup ->
             let locFst = LocAfterTag "RTup2" a loc_tup in
@@ -178,6 +186,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
               let locFst = LocAfterTag "STup2" a loc_tup in
               let locSnd = LocAfter b locFst in
               (Exp a locFst -> Exp b locSnd -> Exp c loc_out) -> Exp c loc_out
+-}
 {-
   IDEA:
     - model cursors and end witnesses
@@ -185,7 +194,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
       + can generate end-witness at compile time from Ty                        ; compile time = end-witness value
       + can genetrate end-witness producing runtime function at compile time    ; runtime      = end-witness function : value -> end-witness
 -}
-
+{-
   CaseEither : {r : _} -> {a, b, c : Ty} -> {scrut_loc : Loc r} -> {loc_out : Loc r_out} -> Exp (Either a b) scrut_loc ->
                let locL = LocAfterTag "Left" a scrut_loc in
                let locR = LocAfterTag "Right" b scrut_loc in
@@ -204,7 +213,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> Type where
 public export
 data Program : Type where
   Main  : {res : Ty} -> Exp res (LocStart res (MkRegion (-1))) -> Program
-
+-}
 -- -------------------------------
 
 {-
@@ -359,4 +368,19 @@ fn = \a => \b => b
     - add example for STup2
     - add static or dynamic assertion to MkInd to check that the referred value is written ; this guarantees the correctness of DeRefPtr
       every function argument must be fully written, every return value must be fully written
+-}
+
+i64 : {loc : _} -> Exp I64 loc [EW loc]
+i64 = MkI64 1
+
+--i64 : {loc : _} -> {auto ews : _} -> Exp I64 loc ews
+--i64 = MkI64 1
+
+{-
+sample_tup2_01 : {loc : _} -> {auto ews : _} -> Exp (STup2 I64 I64) loc ews
+sample_tup2_01 =
+  -- create i64 values
+  let i1 = MkI64 101 in
+  let i2 = MkI64 201 in
+  MkSTup2 i1 i2
 -}
