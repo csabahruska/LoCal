@@ -3,6 +3,11 @@ date: 2026-01-21
 PROBLEM: end witness availability is not tracked by the type system, neither the end-witness requirement property
 TODO/FUTURE WORK: extend the type system to track these too
 
+TODO:
+  - port examples to CPS
+  - add linear arrows
+  - pass/return fun arg end-witnesses
+
 what works:
   - location calculus EDSL model where the location are inferred by the idris type elaborator
   - sharing and indirection support

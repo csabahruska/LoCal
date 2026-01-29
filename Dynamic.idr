@@ -63,7 +63,7 @@ Interpolation (Loc r) where interpolate = show
 -}
 
 -- static index calculator
-
+{-
 getStaticSize : Ty -> Maybe Int
 getStaticSize = \case
   T0    => Just 0
@@ -85,7 +85,7 @@ getStaticSize = \case
       then Just (1 + sa)
       else Nothing
   Box _ => Nothing
-
+-}
 getLocTy : Loc r -> Ty
 getLocTy (LocStart t _) = t
 getLocTy (LocAfter t _) = t
@@ -172,6 +172,7 @@ assertWrite loc = do
   let key = show loc
   when (contains key w) $ do
     assert_total $ idris_crash $ "INTERNAL ERROR: multiple writes on \{loc}"
+    --putStrLn $ "INTERNAL ERROR: multiple writes on \{loc}"
   modify {local.write $= insert key}
 
 newId : M Int
@@ -227,10 +228,10 @@ genFunction fun_name action = do
 isNewFunction : String -> M Bool
 isNewFunction funName = pure $ isNothing (lookup funName !(gets code))
 
-getTy : {t : _} -> {0 l : Loc r} -> (Exp t l) -> Ty
+getTy : {t : _} -> {0 l : Loc r} -> (Exp t l _) -> Ty
 getTy {t} _ = t
 
-getLoc : {t : _} -> {l : Loc r} -> (Exp t l) -> Loc r
+getLoc : {t : _} -> {l : Loc r} -> (Exp t l _) -> Loc r
 getLoc {l} _ = l
 
 addCur : String -> Loc r -> M ()
@@ -300,8 +301,9 @@ genCursor {r} loc = do
                 "STup2" => 0
                 "RTup2" => getRTupTagSize fstTy -- maybe an indirection for snd
                 _       => 1
+          prevCur <- genCursor l
           c <- newCur
-          emit "char* \{c} = \{!(getCursor l)} + \{tagSize}; // STATIC INDEX \{show (getStaticIndex loc)} in \{show (getLocRegion loc)}"
+          emit "char* \{c} = \{prevCur} + \{tagSize}; // STATIC INDEX \{show (getStaticIndex loc)} in \{show (getLocRegion loc)}"
           pure c
 
 hasEndWitness : Loc r -> M Bool
@@ -316,7 +318,7 @@ defineEndWitness loc value = unless !(hasEndWitness loc) $ do
   modify {local.endwitness $= insert (show loc) ew}
   emit "char* \{ew} = \{value};"
 
-updateEndWitnessTo : {loc2 : _} -> (loc : Loc r) -> Exp _ loc2 -> M ()
+updateEndWitnessTo : {loc2 : _} -> (loc : Loc r) -> Exp _ loc2 _ -> M ()
 updateEndWitnessTo {loc2} loc e = do
   ew <- getEndWitness loc2
   modify {local.endwitness $= insert (show loc) ew}
@@ -333,11 +335,6 @@ addStaticSizeEndWitness l msg = do
     modify {local.endwitness $= insert (show l) ew}
     emit "char* \{ew} = \{cur} + \{bytes}; // \{msg}"
     lift $ print $ colored BrightCyan " add endwitness to \{ew} for\n \{l}\n\n"
-
-tryAddStaticSizeEndWitness : Loc r -> String -> M ()
-tryAddStaticSizeEndWitness loc msg = do
-  when (isStaticSize (getLocTy loc)) $ do
-    addStaticSizeEndWitness loc "Var"
 
 defineRTup2FstEndWitness : {r : _} -> Loc r -> Ty -> M ()
 defineRTup2FstEndWitness loc_tup a = do
@@ -361,50 +358,73 @@ maybeSetEndWitness loc value = do
 
 -- TODO: rewrite to continuation passig style EDSL to avoid duplicated codegen, i.e. 'let i = MkI64 1 in MkRTup i (MkPtr i)' will set the value of i to 1 twice
 
-partial fillDyn : {r : _ } -> {t : _ } -> {loc : Loc r} -> Exp t loc -> M ()
+partial fillDyn : Exp t loc _ -> M ()
 
 -- HINT: no end-witness definition is needed for static sized types
 
-fillDyn (MkBox v) = do
+fillDyn (MkBox v cont) = do
   lift $ putStrLn " ++ MkBox"
   fillDyn v
   -- inherits end-witness
+  fillDyn (cont Var Var)
 
-fillDyn (UnBox v) = do
+fillDyn (UnBox v cont) = do
   lift $ putStrLn " ++ UnBox"
   fillDyn v
   -- inherits end-witness
+  fillDyn (cont Var Var)
 
-fillDyn MkT0 = do
+fillDyn (MkT0 {loc_val} cont) = do
   lift $ putStrLn " ++ MkT0"
-  assertWrite loc
-  _ <- genCursor loc
-  addStaticSizeEndWitness loc "MkT0"
+  assertWrite loc_val
+  _ <- genCursor loc_val
+  addStaticSizeEndWitness loc_val "MkT0"
+  fillDyn (cont Var)
 
-fillDyn (MkI64 i) = do
+fillDyn (MkI64 {loc_val} i cont) = do
   lift $ putStrLn " ++ MkI64 \{i}"
-  assertWrite loc
-  cur <- genCursor loc
+  assertWrite loc_val
+  lift $ putStrLn " ++ MkI64 \{i} - 1"
+  cur <- genCursor loc_val
+  lift $ putStrLn " ++ MkI64 \{i} - 2"
   emit "*(int*) \{cur} = \{i}; // MkI64"
-  addStaticSizeEndWitness loc "MkI64"
+  addStaticSizeEndWitness loc_val "MkI64"
+  lift $ putStrLn " ++ MkI64 \{i} - 3"
+  fillDyn (cont Var)
+  lift $ putStrLn " ++ MkI64 \{i} - 4"
 
-fillDyn (MkSTup2 a b) = do
+
+fillDyn (MkSTup2 {loc_tup} va vb cont) = do
   lift $ putStrLn " ++ MkSTup2"
-  assertWrite loc
-  cur <- genCursor loc
-  fillDyn a
-  fillDyn b
-  updateEndWitnessTo loc b -- error if missing
+  assertWrite loc_tup
+  cur <- genCursor loc_tup
+  fillDyn va
+  fillDyn vb
+  updateEndWitnessTo loc_tup vb -- error if missing
+  fillDyn (cont Var Var Var)
 
-fillDyn (MkRTup2 a b) = do
+{-
+  MkRTup2 : {a, b, o : Ty} -> {loc : Loc r} -> {ew2, ew_out : _} -> {loc_out : _} ->
+    let locFst = LocAfterTag "RTup2" a loc in
+    let locSnd = LocAfter b locFst in
+    Exp a locFst EW -> Exp b locSnd ew2 -> (Exp a locFst EW -> Exp b locSnd ew2 -> Exp (RTup2 a b) loc ew2 -> Exp o loc_out ew_out) -> Exp o loc_out ew_out
+-}
+fillDyn (MkRTup2 {a, b, loc_tup} va vb cont) = do
   lift $ putStrLn " ++ MkRTup2"
-  assertWrite loc
-  cur <- genCursor loc -- cursor for RTup2, which is: indirection-to-snd/fst-endwitness + fst + snd
-  fillDyn a
-  unless (isStaticSize (getTy a)) $ do
-    emit "*(int*) \{cur} = \{!(getEndWitness $ getLoc a)} - \{cur}; // RTup2 fst size in bytes"
-  fillDyn b
-  updateEndWitnessTo loc b -- error if missing
+  assertWrite loc_tup
+  cur <- genCursor loc_tup -- cursor for RTup2, which is: indirection-to-snd/fst-endwitness + fst + snd
+  lift $ putStrLn " ++ MkRTup2 - 1"
+  fillDyn va
+  lift $ putStrLn " ++ MkRTup2 - 2"
+  unless (isStaticSize a) $ do
+    emit "*(int*) \{cur} = \{!(getEndWitness $ getLoc va)} - \{cur}; // RTup2 fst size in bytes"
+  lift $ putStrLn " ++ MkRTup2 - 3"
+  fillDyn vb
+  lift $ putStrLn " ++ MkRTup2 - 4"
+  updateEndWitnessTo loc_tup vb -- error if missing
+  lift $ putStrLn " ++ MkRTup2 - 5"
+  fillDyn (cont Var Var Var)
+  lift $ putStrLn " ++ MkRTup2 - 6"
 
 {-
   NOTES:
@@ -415,31 +435,35 @@ fillDyn (MkRTup2 a b) = do
 
   TODO: track effects for locations
 -}
-
-fillDyn (MkPtr {loc_in} v) = do
+fillDyn (MkPtr {loc_in, loc_ptr} v cont) = do
   lift $ putStrLn " ++ MkPtr"
-  assertWrite loc
+  assertWrite loc_ptr
   --fillDyn v -- v is already generated, the CPS EDSL will fix this proper
-  cur <- genCursor loc
+  cur <- genCursor loc_ptr
   cur_in <- getCursor loc_in
   -- TODO: support forward pointers
   -- Q: how to decide if a location is after or before of another?
   -- A: it is possible to compute that from loctions
   --  TODO: write such a function
   emit "*(char**) \{cur} = \{cur_in};"
-  addPointer (MkLocVal loc_in) loc
-  addStaticSizeEndWitness loc "MkPtr"
+  addPointer (MkLocVal loc_in) loc_ptr
+  addStaticSizeEndWitness loc_ptr "MkPtr"
+  fillDyn (cont Var Var)
 
-fillDyn (MkOffset {loc_in} v) = do
+--  MkOffset    : {loc_in : Loc r} -> {loc_ofs : Loc r} -> Exp t loc_in ew_in -> (Exp t loc_in ew_in -> Exp (Offset t) loc_ofs EW -> Exp a loc ew) -> Exp a loc ew
+fillDyn (MkOffset {loc_in, loc_ofs} v cont) = do
   lift $ putStrLn " ++ MkOffset"
-  assertWrite loc
+  assertWrite loc_ofs
   --fillDyn v -- v is already generated, the CPS EDSL will fix this proper
-  cur <- genCursor loc
+  cur <- genCursor loc_ofs
   cur_in <- getCursor loc_in
   emit "*(int*) \{cur} = \{cur_in} - \{cur};"
-  addPointer (MkLocVal loc_in) loc
-  addStaticSizeEndWitness loc "MkOffset"
+  addPointer (MkLocVal loc_in) loc_ofs
+  addStaticSizeEndWitness loc_ofs "MkOffset"
+  fillDyn (cont Var Var)
 
+--  DeRefPtr : {t : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
+--             Exp (Ptr t) loc_in ew_in -> (Exp (Ptr t) loc_in EW -> (r_val : _) -> (loc_val : Loc r_val) -> Exp t loc_val NoEW -> Exp a loc ew) -> Exp a loc ew
 fillDyn (DeRefPtr {r_in, loc_in} v cont) = do
   lift $ putStrLn " ++ DeRefPtr"
   assertRead loc_in
@@ -448,7 +472,7 @@ fillDyn (DeRefPtr {r_in, loc_in} v cont) = do
   MkLocVal {r=r_val} loc_val <- getPointer loc_in
   cur <- genCursor loc_val
   emit "\{cur} = *(char**)\{cur_in}; // DeRefPtr"
-  fillDyn (cont r_val loc_val Var)
+  fillDyn (cont Var r_val loc_val Var)
 
 fillDyn (DeRefOffset {r_in, loc_in} v cont) = do
   lift $ putStrLn " ++ DeRefOffset"
@@ -461,23 +485,35 @@ fillDyn (DeRefOffset {r_in, loc_in} v cont) = do
     Yes Refl => do
       cur <- genCursor loc_val
       emit "\{cur} = \{cur_in} + *(int*)\{cur_in}; // DeRefOffset"
-      fillDyn (cont loc_val Var)
+      fillDyn (cont Var loc_val Var)
 
-fillDyn (MkLeft a) = do
+{-
+  MkLeft  : {a, b : Ty} -> {r_left : _} -> {loc_left : Loc r_left} ->
+    let locArg = LocAfterTag "Left" a loc_left in
+    Exp a locArg ewArg -> (Exp a locArg ewArg -> Exp (Either a b) loc_left ewArg -> Exp o loc ew) -> Exp o loc ew
+-}
+fillDyn (MkLeft {loc_left} arg cont) = do
   lift $ putStrLn " ++ MkLeft"
-  assertWrite loc
-  cur <- genCursor loc
+  assertWrite loc_left
+  cur <- genCursor loc_left
   emit "*(char*) \{cur} = 0; // LEFT_TAG"
-  fillDyn a
-  updateEndWitnessTo loc a -- error if missing
-
-fillDyn (MkRight b) = do
+  fillDyn arg
+  updateEndWitnessTo loc_left arg -- error if missing
+  fillDyn (cont Var Var)
+{-
+  MkRight : {a, b : Ty} -> {r_right : _} -> {loc_right : Loc r_right} ->
+    let locArg = LocAfterTag "Right" b loc_right in
+    Exp b locArg ewArg -> (Exp b locArg ewArg -> Exp (Either a b) loc_right ewArg -> Exp o loc ew) -> Exp o loc ew
+-}
+fillDyn (MkRight {loc_right} arg cont) = do
   lift $ putStrLn " ++ MkRight"
-  assertWrite loc
-  cur <- genCursor loc
+  assertWrite loc_right
+  cur <- genCursor loc_right
   emit "*(char*) \{cur} = 1; // RIGHT_TAG"
-  fillDyn b
-  updateEndWitnessTo loc b -- error if missing
+  fillDyn arg
+  updateEndWitnessTo loc_right arg -- error if missing
+  fillDyn (cont Var Var)
+
 {-
   TODO: implement effect tracking and cursor and end-witness generation
   Q: should we get rid off LocBoxCorcion with removing Ty from Loc type?
@@ -485,13 +521,22 @@ fillDyn (MkRight b) = do
       what would i lose if only Exp would track types and not locations?
   A: yes, it makes the system simpler
 -}
+--  PrjFst : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup} -> {ew, ew_tup : _} -> {loc : _} ->
+--           Exp (RTup2 a b) loc_tup ew_tup ->
+--           let locFst = LocAfterTag "RTup2" a loc_tup in
+--           (Exp (RTup2 a b) loc_tup ew_tup -> Exp a locFst EW -> Exp c loc ew) -> Exp c loc ew
 
 fillDyn (PrjFst {a, loc_tup} tup cont) = do
   lift $ putStrLn " ++ PrjFst"
   fillDyn tup
   defineRTup2FstEndWitness loc_tup a
-  fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
+  fillDyn $ cont Var Var -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
 
+--  PrjSnd : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup} -> {ew, ew_tup : _} -> {loc : _} ->
+--           Exp (RTup2 a b) loc_tup ew_tup ->
+--           let locFst = LocAfterTag "RTup2" a loc_tup in
+--           let locSnd = LocAfter b locFst in
+--           (Exp (RTup2 a b) loc_tup ew_tup -> Exp b locSnd ew_tup -> (Exp b locSnd EW -> Exp (RTup2 a b) loc_tup EW) -> Exp c loc ew) -> Exp c loc ew
 fillDyn (PrjSnd {a, b, loc_tup} tup cont) = do
   lift $ putStrLn " ++ PrjSnd"
   fillDyn tup
@@ -499,33 +544,42 @@ fillDyn (PrjSnd {a, b, loc_tup} tup cont) = do
   let locFst = LocAfterTag "RTup2" a loc_tup
       locSnd = LocAfter b locFst
   _ <- genCursor locSnd
-  fillDyn (cont Var) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
+  -- TODO: write test for tuple end-witness creator function
+  fillDyn (cont Var Var (const Var)) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
   -- try to set end-witness for RTup2 if snd was traversed
   maybeSetEndWitness loc_tup locSnd
 
-fillDyn (AddI64 {loc_in, loc_in2} a b) = do
+--  AddI64 : {r_in : _} -> {r_in2 : _} -> {r_res : _} -> {loc_in : Loc r_in} -> {loc_in2 : Loc r_in2} -> {loc_res : Loc r_res} ->
+--           Exp I64 loc_in ew1 -> Exp I64 loc_in2 ew2 ->
+--           (Exp I64 loc_in EW -> Exp I64 loc_in2 EW -> Exp I64 loc_res EW -> Exp a loc ew) -> Exp a loc ew
+fillDyn (AddI64 {loc_in, loc_in2, loc_res} a b cont) = do
   lift $ putStrLn " ++ AddI64"
   assertRead loc_in
   assertRead loc_in2
-  assertWrite loc
+  assertWrite loc_res
   fillDyn a
   fillDyn b
-  cur <- genCursor loc
+  cur <- genCursor loc_res
   cur_in <- getCursor loc_in
   cur_in2 <- getCursor loc_in2
   emit "*(int*) \{cur} = *(int*) \{cur_in} + *(int*) \{cur_in2};"
   addStaticSizeEndWitness loc_in  "AddI64 - arg1"
   addStaticSizeEndWitness loc_in2 "AddI64 - arg2"
-  addStaticSizeEndWitness loc     "AddI64 - result"
+  addStaticSizeEndWitness loc_res "AddI64 - result"
+  fillDyn $ cont Var Var Var
 
-fillDyn (EqI64 {loc_in, loc_in2} a b) = do
+--  EqI64  : {r_in : _} -> {r_in2 : _} -> {loc_in : Loc r_in} -> {loc_in2 : Loc r_in2} -> {loc_res : Loc r_res} ->
+--           Exp I64 loc_in ew1 -> Exp I64 loc_in2 ew2 ->
+--           (Exp I64 loc_in EW -> Exp I64 loc_in2 EW -> Exp (Either T0 T0) loc_res EW -> Exp a loc ew) -> Exp a loc ew
+
+fillDyn (EqI64 {loc_in, loc_in2, loc_res} a b cont) = do
   lift $ putStrLn " ++ EqI64"
   assertRead loc_in
   assertRead loc_in2
-  assertWrite loc
+  assertWrite loc_res
   fillDyn a
   fillDyn b
-  cur <- genCursor loc
+  cur <- genCursor loc_res
   cur_in <- getCursor loc_in
   cur_in2 <- getCursor loc_in2
   emit "if (*(int*) \{cur_in} == *(int*) \{cur_in2}) { // true"
@@ -535,85 +589,106 @@ fillDyn (EqI64 {loc_in, loc_in2} a b) = do
   emit "}"
   addStaticSizeEndWitness loc_in  "EqI64 - arg1"
   addStaticSizeEndWitness loc_in2 "EqI64 - arg2"
-  addStaticSizeEndWitness loc     "EqI64 - result"
+  addStaticSizeEndWitness loc_res "EqI64 - result"
+  fillDyn $ cont Var Var Var
 
-fillDyn (PrintI64 {loc_in} a) = do
+--  PrintI64 : {r_in : _} -> {loc_in : Loc r_in} -> Exp I64 loc_in _ -> (Exp I64 loc_in EW -> Exp res loc ew) -> Exp res loc ew
+fillDyn (PrintI64 {loc_in} a cont) = do
   lift $ putStrLn " ++ PrintI64"
   assertRead loc_in
-  assertWrite loc
   fillDyn a
-  cur <- genCursor loc
   cur_in <- getCursor loc_in
   emit "printf(\"%d\\n\", *(int*) \{cur_in});"
   addStaticSizeEndWitness loc_in  "PrintI64 - arg1"
-  addStaticSizeEndWitness loc     "PrintI64 - result"
+  fillDyn $ cont Var
 
-fillDyn (PrintValue {loc_in} a) = do
+--  PrintValue : {r_in : _} -> {t : _} -> {loc_in : Loc r_in} -> Exp t loc_in EW -> (Exp t loc_in EW -> Exp res loc ew) -> Exp res loc ew
+fillDyn (PrintValue {loc_in} a cont) = do
   lift $ putStrLn " ++ PrintValue"
   assertRead loc_in
-  assertWrite loc
   fillDyn a
-  cur <- genCursor loc
   cur_in <- getCursor loc_in
   cur_end <- getEndWitness loc_in
   emit "print_hex(\{cur_in}, \{cur_end} - \{cur_in});"
-  addStaticSizeEndWitness loc "PrintValue - result"
+  fillDyn $ cont Var
 
 fillDyn (LetRegion cont) = do
   lift $ putStrLn " ++ LetRegion"
   let r = MkRegion !newId
   fillDyn (cont r)
 
-fillDyn (LetRegionValue {a,t} r v cont) = do
+fillDyn (LetRegionValue {t_val} r v cont) = do
   lift $ putStrLn " ++ LetRegionValue"
   c <- newCursorName
   emit "char *\{c} = newRegion();"
-  let loc_start = LocStart t r
+  let loc_start = LocStart t_val r
   addCur c loc_start
-  fillDyn {t=t} v
-  tryAddStaticSizeEndWitness loc_start "LetRegionValue"
-  fillDyn {t=a} (cont Var)
+  fillDyn v
+  fillDyn (cont Var)
+{-
+  CaseSTup2 : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup} -> {ewFst, ew_tup, ew : _} -> {loc : _} ->
+              Exp (STup2 a b) loc_tup ew_tup ->
+              let locFst = LocAfterTag "STup2" a loc_tup in
+              let locSnd = LocAfter b locFst in
+              ( Exp a locFst ewFst ->
+                -- gives access for snd
+                (Exp a locFst EW -> Exp b locSnd ew_tup) ->
+                -- gives end-witness for STup2
+                (Exp b locSnd EW -> Exp (STup2 a b) loc_tup EW) ->
+                Exp c loc ew
+              ) -> Exp c loc ew
+-}
 
-fillDyn (CaseSTup2 {a, b, loc_tup} tup cont) = do
+fillDyn (CaseSTup2 tup cont) = do
   lift $ putStrLn " ++ CaseSTup2"
   fillDyn tup
-  fillDyn (cont Var Var)
+  fillDyn $ cont Var (const Var) (const Var)
+  {-
   -- create tup end-witness
   let locFst = LocAfterTag "STup2" a loc_tup
       locSnd = LocAfter b locFst
   _ <- genCursor locSnd
   -- try to set end-witness for STup2 if snd was traversed
   maybeSetEndWitness loc_tup locSnd
+  -}
 
 --TODO: example for stup2 where an int pair is created and passed to a function that prints the fst and snd ; also create an error case that prints only the snd or snd then fst
-
-fillDyn (CaseEither {scrut_loc} scrut cont_left cont_right) = do
+{-
+  CaseEither : {r_scrut : _} -> {a, b, c : Ty} -> {loc_scrut : Loc r_scrut} -> {ew_scrut, ew : _} -> {loc : _} ->
+               Exp (Either a b) loc_scrut ew_scrut ->
+               let locL = LocAfterTag "Left" a loc_scrut in
+               let locR = LocAfterTag "Right" b loc_scrut in
+               (Exp a locL ew_scrut -> (Exp a locL EW -> Exp (Either a b) loc_scrut EW) -> Exp c loc ew) ->
+               (Exp b locR ew_scrut -> (Exp b locR EW -> Exp (Either a b) loc_scrut EW) -> Exp c loc ew) ->
+               Exp c loc ew
+-}
+-- TODO: simplify end-witness handling
+fillDyn (CaseEither {loc_scrut} scrut cont_left cont_right) = do
   lift $ putStrLn " ++ CaseEither"
   fillDyn scrut
-  cur <- genCursor loc
   let cur_end_tmp = "\{!(newCursorName)}_end_tmp"
   emit "char* \{cur_end_tmp} = 0; // uninitalized"
-  cur_tag <- getCursor scrut_loc
+  cur_tag <- getCursor loc_scrut
 
   let cur_tag_end_tmp = "\{cur_tag}_end_tmp"
   emit "char* \{cur_tag_end_tmp} = 0; // uninitalized"
 
   emit "if (*(char*) \{cur_tag} == 0) { // LEFT"
   (scrut_ew_left, left_cglocal) <- indent $ localScope $ do
-    let expL = cont_left Var
+    let expL = cont_left Var (const Var)
     fillDyn expL
     emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expL)};"
-    scrut_ew <- lookupEndWitness scrut_loc
+    scrut_ew <- lookupEndWitness loc_scrut
     case scrut_ew of
       Nothing => pure ()
       Just ew => emit "\{cur_tag_end_tmp} = \{ew};"
     pure (isJust scrut_ew, !(gets (.local)))
   emit "} else { // RIGHT"
   (scrut_ew_right, right_cglocal) <- indent $ localScope $ do
-    let expR = cont_right Var
+    let expR = cont_right Var (const Var)
     fillDyn expR
     emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expR)};"
-    scrut_ew <- lookupEndWitness scrut_loc
+    scrut_ew <- lookupEndWitness loc_scrut
     case scrut_ew of
       Nothing => pure ()
       Just ew => emit "\{cur_tag_end_tmp} = \{ew};"
@@ -623,55 +698,82 @@ fillDyn (CaseEither {scrut_loc} scrut cont_left cont_right) = do
          , local.write  $= union (intersection left_cglocal.write right_cglocal.write)
          }
   defineEndWitness loc cur_end_tmp
-  -- add end-witness for scrut_loc ; this can be done when both left and right eliminator has it
+  -- add end-witness for loc_scrut ; this can be done when both left and right eliminator has it
   when (scrut_ew_left && scrut_ew_right) $ do
-    defineEndWitness scrut_loc cur_tag_end_tmp
+    defineEndWitness loc_scrut cur_tag_end_tmp
 
-fillDyn (Copy {r_in, loc_in} _) = do
+--  Copy : {r_in : _} -> {loc_in : Loc r_in} -> Exp t loc_in EW -> (Exp t loc_in EW -> Exp t loc_copy EW -> Exp a loc ew) -> Exp a loc ew
+fillDyn (Copy {r_in, loc_in, loc_copy} a cont) = do
   lift $ putStrLn " ++ Copy"
+  fillDyn a
   assertRead loc_in
-  assertWrite loc
+  assertWrite loc_copy
   cur_src <- getCursor loc_in
-  cur_dst <- genCursor loc
+  cur_dst <- genCursor loc_copy
   cur_src_end <- getEndWitness loc_in
   emit "memcpy(\{cur_dst}, \{cur_src}, \{cur_src_end} - \{cur_src});"
-  defineEndWitness loc "\{cur_dst} + (\{cur_src_end} - \{cur_src})"
+  defineEndWitness loc_copy "\{cur_dst} + (\{cur_src_end} - \{cur_src})"
+  fillDyn (cont Var Var)
+{-
+  MkStaticEW : {t : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {auto _ : Just size = getStaticSize t} ->
+               Exp t loc_in _ ->
+              (Exp t loc_in EW -> Exp res loc ew) ->
+                                  Exp res loc ew
+-}
+fillDyn (MkStaticEW {loc_in} v cont) = do
+  lift $ putStrLn " ++ MkStaticEW"
+  fillDyn v
+  addStaticSizeEndWitness loc_in  "MkStaticEW"
+  fillDyn $ cont Var
 
-fillDyn Var = do
-  cur <- genCursor loc
-  emit "/* \{cur} = \{loc} */"
-  emit "// Var \{t}" -- assert_total $ idris_crash $ "Var"
-  tryAddStaticSizeEndWitness loc "Var"
+fillDyn (Var {t_var, loc_var}) = do
+  lift $ putStrLn " ++ Var"
+  cur <- genCursor loc_var
+  emit "/* \{cur} = \{loc_var} */"
+  emit "// Var \{t_var}" -- assert_total $ idris_crash $ "Var"
 
-fillDyn (FunApp {loc_in} fun_name fun arg) = do
+{-
+  FunApp : --{r_arg : _} -> {t_arg : _} -> {loc_arg : Loc r_arg} ->
+           String ->
+           (Exp t_arg loc_arg ew_arg -> (Exp t_arg loc_arg ew_arg_out, Exp res loc_res EW)) ->
+           Exp t_arg loc_arg ew_arg ->
+           (Exp t_arg loc_arg ew_arg_out -> Exp res loc_res EW -> Exp c loc ew) ->
+           Exp c loc ew
+-}
+-- TODO: input end-witness passing and return
+fillDyn (FunApp {loc_arg, loc_res} fun_name fun arg cont) = do
   lift $ putStrLn " ++ FunApp \{fun_name}"
   fillDyn arg
-  cur_out <- genCursor loc
-  cur_in <- getCursor loc_in
+  cur_out <- genCursor loc_res
+  cur_in <- getCursor loc_arg
   -- HINT: fun may or may not need arg end witness
   --    Q: how to handle this?
   --    A: arg end-witness is not needed
 
   -- TODO: omit end-witness for static sized outputs
-  defineEndWitness loc "\{fun_name}(\{cur_in}, \{cur_out})"
+  defineEndWitness loc_res "\{fun_name}(\{cur_in}, \{cur_out})"
   -- codegen function if needed
   when !(isNewFunction fun_name) $ do
     genFunction fun_name $ do
       -- TODO: support multi parameter functions
       -- TODO: pass arg's pointers entry if any
       cur_arg <- newCursorName
-      addCur cur_arg loc_in
+      addCur cur_arg loc_arg
       cur_out <- newCursorName
-      addCur cur_out loc
+      addCur cur_out loc_res
       emitDecl "char* \{fun_name}(char* \{cur_arg}, char* \{cur_out});"
       emit "char* \{fun_name}(char* \{cur_arg}, char* \{cur_out}) {"
       indent $ do
-        emit "/* \{cur_arg} = \{loc_in} */"
-        emit "/* \{cur_out} = \{loc} */"
-        tryAddStaticSizeEndWitness loc_in "fun arg"
-        fillDyn (fun Var)
-        emit "return \{!(getEndWitness loc)};"
+        emit "/* \{cur_arg} = \{loc_arg} */"
+        emit "/* \{cur_out} = \{loc_res} */"
+        -- TODO: add end-witness when passed as argument
+        when (isStaticSize (getLocTy loc_arg)) $ do
+          addStaticSizeEndWitness loc_arg "fun arg auto static end-witness"
+        let (res) = fun Var
+        fillDyn res
+        emit "return \{!(getEndWitness loc_res)};"
       emit "}"
+  fillDyn $ cont Var
 
 c_header : String
 c_header = """
@@ -698,7 +800,7 @@ c_header = """
   """
 
 partial public export
-toBufferDyn : {t : _} -> Exp t (LocStart t (MkRegion (-1))) -> IO String
+toBufferDyn : {t : _} -> Exp t (LocStart t (MkRegion (-1))) EW -> IO String
 toBufferDyn {t} e = do
   print $ background Yellow " ---- CODEGEN ----"
   putStrLn ""

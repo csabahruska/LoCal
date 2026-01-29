@@ -17,22 +17,31 @@ mutual
   my_ty_box : Ty
   my_ty_box = Box my_ty
 
-sample_box_03 : {loc : _} -> Exp Examples2.my_ty loc
-sample_box_03 = MkRight MkT0
+sample_box_03 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc EW
+sample_box_03 =
+  MkT0 $ \t0 =>
+  MkRight t0 $ \t0, e => e
 
-sample_box_04 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty_box loc
-sample_box_04 = MkBox sample_box_03
+sample_box_04 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty_box loc EW
+sample_box_04 = MkBox sample_box_03 $ \u, b => b
 
-sample_box_05 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc
-sample_box_05 = UnBox sample_box_04
+sample_box_05 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc EW
+sample_box_05 = UnBox sample_box_04 $ \b, u => u
 
-sample_box_06 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc
-sample_box_06 = MkLeft $ MkRTup2 (MkI64 1) sample_box_04
+sample_box_06 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc EW
+sample_box_06 =
+  MkI64 1 $ \i =>
+  MkRTup2 i sample_box_04 $ \f, s, t =>
+  MkLeft t $ \t, e => e
 
-sample_box_07 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc
-sample_box_07 = MkLeft $ MkRTup2 (MkI64 2) $ MkBox sample_box_06
+sample_box_07 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc EW
+sample_box_07 =
+  MkI64 2 $ \i =>
+  MkBox sample_box_06 $ \_, b =>
+  MkRTup2 i b $ \f, s, t =>
+  MkLeft t $ \t, e => e
 
-
+{-
 -- data IntList = Cons IntList Int
 --              | Nil
 
@@ -61,17 +70,18 @@ sample_box_17 = MkLeft $ MkRTup2 (MkBox sample_box_16) (MkI64 2)
 -------------------------------------------
 -- END of boxing experiment
 -------------------------------------------
+-}
+i64 : {r : _} -> {loc : Loc r} -> Exp I64 loc EW
+i64 = MkI64 1 id
 
-i64 : {loc : _} -> Exp I64 loc
-i64 = MkI64 1
-
-sample_tup2_01 : {loc : _} -> Exp (RTup2 I64 I64) loc
+sample_tup2_01 : {r : _} -> {loc : Loc r} -> Exp (RTup2 I64 I64) loc EW
 sample_tup2_01 =
   -- create i64 values
-  let i1 = MkI64 101 in
-  let i2 = MkI64 201 in
-  MkRTup2 i1 i2
+  MkI64 101 $ \i1 =>
+  MkI64 102 $ \i2 =>
+  MkRTup2 i1 i2 $ \i1, i2, rt => rt
 
+{-
 sample_tup2_01_sharing : {loc : _} -> Exp (RTup2 I64 (Offset I64)) loc
 sample_tup2_01_sharing =
   -- create i64 values
@@ -84,19 +94,11 @@ sample_tup2_01_sharing2 =
   let i1 = MkI64 101 in
   MkRTup2 (MkOffset i1) i1
 
-
---sample_tup2_03 = sample_tup2_02 {loc = MkLE (LocStart (MkRegion 0))}
-{-
-sample_print_snd : {loc_in : Loc _} -> {loc_out : _} -> Exp T0 loc_out
-sample_print_snd =
-  let t = sample_tup2_01_sharing in
-  PrjSnd {loc=loc_in }{loc_out} t $ \i =>
-  PrintI64 i
 -}
 
-sample_tup2_02 : {loc : _} -> Exp (RTup2 (RTup2 I64 I64) (RTup2 I64 I64)) loc
-sample_tup2_02 = MkRTup2 sample_tup2_01 sample_tup2_01
-
+sample_tup2_02 : {r : _} -> {loc : Loc r} -> Exp (RTup2 (RTup2 I64 I64) (RTup2 I64 I64)) loc EW
+sample_tup2_02 = MkRTup2 sample_tup2_01 sample_tup2_01 $ \_,_, t => t
+{-
 sample_print_snd_fst : {loc_out : _} -> Exp T0 loc_out
 sample_print_snd_fst =
   LetRegion $ \r =>
@@ -226,7 +228,7 @@ test_5 =
           LetRegion $ \r =>
           LetRegionValue r (MkI64 123) $ \i =>
           FunApp "myPrint" myPrint i
-
+-}
 {-
   done:
     add Int primops
@@ -246,7 +248,7 @@ test_5 =
     would it be possible to add special region to model stack frame, a region that is local and tied to function scope?
     that would simplify writing programs
 -}
-
+{-
 test_6 : Program
 test_6 =
   let genList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp I64 loc_in -> Exp I64 loc_out
@@ -492,19 +494,47 @@ test_16 =
       LetRegion $ \r =>
       LetRegionValue r (MkSTup2 (MkI64 7) (MkI64 8)) $ \l =>
       FunApp "printPair" printPair l
+-}
+
+test_16 : Program
+test_16 =
+  let printPair : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp (STup2 I64 I64) loc_in ew -> Exp T0 loc_out EW
+      printPair p =
+        CaseSTup2 p $ \fst, snd_fun, tup_ew_fun =>
+        PrintI64 fst $ \fst =>
+        let snd = snd_fun fst in
+        PrintI64 snd $ \snd =>
+        MkT0 $ \t0 => t0
+  in Main $
+      LetRegion $ \r =>
+      LetRegionValue r (
+        MkI64 7 $ \i1 =>
+        MkI64 8 $ \i2 =>
+        MkSTup2 i1 i2 $ \i1, i2, t1 => t1
+      ) $ \t1 =>
+      FunApp "printPair" printPair t1 $ \res =>
+      res
 
 test_17 : Program
 test_17 =
-  let printPair : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp (STup2 I64 I64) loc_in -> Exp T0 loc_out
+  let printPair : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp (STup2 I64 I64) loc_in ew -> Exp T0 loc_out EW
       printPair p =
-        CaseSTup2 p $ \fst, snd =>
-        LetRegion $ \r =>
-        LetRegionValue r (PrintI64 snd) $ \_ =>
-        PrintI64 fst
+        CaseSTup2 p $ \fst, snd_fun, tup_ew_fun =>
+        MkStaticEW fst $ \fst =>
+        let snd = snd_fun fst in
+        PrintI64 snd $ \snd =>
+        PrintI64 fst $ \fst =>
+        MkT0 $ \t0 => t0
   in Main $
       LetRegion $ \r =>
-      LetRegionValue r (MkSTup2 (MkI64 7) (MkI64 8)) $ \l =>
-      FunApp "printPair" printPair l
+      LetRegionValue r (
+        MkI64 7 $ \i1 =>
+        MkI64 8 $ \i2 =>
+        MkSTup2 i1 i2 $ \i1, i2, t1 => t1
+      ) $ \t1 =>
+      FunApp "printPair" printPair t1 $ \res =>
+      res
+
 
 -- test
 
@@ -521,6 +551,10 @@ main = do
   putStr !(toBufferDyn sample_tup2_01_sharing)
   putStr !(toBufferDyn sample_tup2_01_sharing2)
   putStr !(toBufferDyn sample_tup2_02)
+  -}
+--  _ <- compileProgram "sample_tup2_01" $ Main sample_tup2_01
+  _ <- compileProgram "sample_tup2_02" $ Main sample_tup2_02
+  {-
   putStr !(toBufferDyn sample_left_01)
   putStr !(toBufferDyn sample_tup_either_01)
   putStr !(toBufferDyn sample_print_snd_fst)
@@ -542,14 +576,16 @@ main = do
   --putStr !(toBufferDyn sample_print_either_elim2)
   --putStr !(toBufferDyn sample_print_either_elim5_forward_ind) -- TODO
   --putStr !(toBufferDyn sample_print_either_elim5_backward_ind)
+{-
   _ <- compileProgram "test11" test_11
   _ <- compileProgram "test8" test_8
   _ <- compileProgram "test12" test_12
   _ <- compileProgram "test13" test_13
   _ <- compileProgram "test14" test_14
   _ <- compileProgram "test15" test_15
+-}
   _ <- compileProgram "test16" test_16
-  -- _ <- compileProgram "test17" test_17 -- this test should fail, because snd is used first in an STup2
+  _ <- compileProgram "test17" test_17
   pure ()
 {-
 TODO:
