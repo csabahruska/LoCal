@@ -355,9 +355,16 @@ maybeSetEndWitness loc value = do
   case lookup (show value) ends of
     Nothing => pure () -- todo
     Just ew => modify {local.endwitness $= insert (show loc) ew}
-
--- TODO: rewrite to continuation passig style EDSL to avoid duplicated codegen, i.e. 'let i = MkI64 1 in MkRTup i (MkPtr i)' will set the value of i to 1 twice
-
+{-
+  TODO: rewrite to continuation passig style EDSL to avoid duplicated codegen, i.e. 'let i = MkI64 1 in MkRTup i (MkPtr i)' will set the value of i to 1 twice
+  PROBLEM: this is a wrong example because Ptr should not implicate codegen for its argument because it is contained by some other structure
+  REQUIREMENT/GOAL:
+    the IR and codegen must be a direct representation of the instruction ordering of the final program
+    this rules out CPS style IR
+    it requires non CPS normal value focused IR with direct codegen
+  Q: what creates the cursors for arguments?
+  A: structure eliminators and function body
+-}
 partial fillDyn : Exp t loc _ -> M ()
 
 -- HINT: no end-witness definition is needed for static sized types

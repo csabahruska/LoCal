@@ -4,8 +4,9 @@ PROBLEM: end witness availability is not tracked by the type system, neither the
 TODO/FUTURE WORK: extend the type system to track these too
 
 TODO:
-  - port examples to CPS
-  - add linear arrows
+  - CANCEL: port examples to CPS
+  - CANCEL: add linear arrows
+  - port everything back to direct value based IR, it is ok because (CPS style) MkStaticEW solves the end-witness effect problem
   - pass/return fun arg end-witnesses
 
 what works:
@@ -22,7 +23,7 @@ limitations:
   - only I64 primitive type
 
 FUTURE WORK:
-  - refactor to CPS style EDSL to prevent codegen duplications
+  - SKIP: refactor to CPS style EDSL to prevent codegen duplications
   - end-witness tracking in the type system ; functions return end-witnesses of the traversed input values
       ideas: a) use linear variables b) index Exp with traverse effect environment
   - index Loc with Ty for more safety

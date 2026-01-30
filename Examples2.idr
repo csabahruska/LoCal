@@ -65,14 +65,15 @@ sample_box_15 = UnBox sample_box_14 $ \b, u => u
 
 sample_box_16 : {r : _} -> {loc : Loc r} -> Exp Examples2.rev_my_ty loc EW
 sample_box_16 =
+  MkBox sample_box_13 $ \_, b =>
   MkI64 1 $ \i =>
-  MkRTup2 sample_box_14 i $ \f, s, t =>
+  MkRTup2 b i $ \f, s, t =>
   MkLeft t $ \t, e => e
 
 sample_box_17 : {r : _} -> {loc : Loc r} -> Exp Examples2.rev_my_ty loc EW
 sample_box_17 =
-  MkI64 2 $ \i =>
   MkBox sample_box_16 $ \_, b =>
+  MkI64 2 $ \i =>
   MkRTup2 b i $ \f, s, t =>
   MkLeft t $ \t, e => e
 
@@ -83,11 +84,18 @@ sample_box_17 =
 i64 : {r : _} -> {loc : Loc r} -> Exp I64 loc EW
 i64 = MkI64 1 id
 
-sample_tup2_01 : {r : _} -> {loc : Loc r} -> Exp (RTup2 I64 I64) loc EW
-sample_tup2_01 =
+sample_tup2_01_rev_cont : {r : _} -> {loc : Loc r} -> Exp (RTup2 I64 I64) loc EW
+sample_tup2_01_rev_cont =
   -- create i64 values
   MkI64 102 $ \i2 =>
   MkI64 101 $ \i1 =>
+  MkRTup2 i1 i2 $ \i1, i2, rt => rt
+
+sample_tup2_01 : {r : _} -> {loc : Loc r} -> Exp (RTup2 I64 I64) loc EW
+sample_tup2_01 =
+  -- create i64 values
+  MkI64 101 $ \i1 =>
+  MkI64 102 $ \i2 =>
   MkRTup2 i1 i2 $ \i1, i2, rt => rt
 
 {-
@@ -198,46 +206,29 @@ sample_print_either_elim5_backward_ind =
         (\r => MkRight (MkI64 33)) in
   let i1 = MkI64 44 in
   MkRTup2 (MkRTup2 i1 v1) (MkOffset i1)
-
+-}
 test_1 : Program
-test_1 =
-  let mainFun : {loc_out : _} -> Exp T0 loc_out
-      mainFun =
-            LetRegion $ \r =>
-            LetRegionValue r (MkI64 123) $ \e1 =>
-            PrintI64 e1
-  in Main mainFun
+test_1 = Main $
+  MkI64 123 $ \i =>
+  PrintI64 i $ \i =>
+  i
 
 test_2 : Program
-test_2 =
-  Main $ LetRegion $ \r =>
-         LetRegionValue r (MkI64 123) $ \e1 =>
-         PrintI64 e1
-
-test_3 : Program
-test_3 =
-  Main $ LetRegion $ \r =>
-          LetRegionValue r (MkI64 123) $ \e1 =>
-          PrintI64 e1
-
-test_4 : Program
-test_4 =
-  let mainExp : {loc : _} -> Exp T0 loc
-      mainExp =
-          LetRegion $ \r =>
-          LetRegionValue r (MkI64 123) $ \e1 =>
-          PrintI64 e1
-  in Main mainExp
+test_2 = Main $
+  LetRegion $ \r =>
+  LetRegionValue r (MkI64 123 id) $ \e1 =>
+  PrintI64 e1 $ \e1 =>
+  MkT0 id
 
 test_5 : Program
 test_5 =
-  let myPrint : {r_in : _} -> {loc_in : Loc r_in} -> Exp I64 loc_in -> Exp T0 loc_out
-      myPrint i = PrintI64 i
+  let myPrint : {r_out : _} -> {loc_out : Loc r_out} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp I64 loc_in EW -> Exp T0 loc_out EW
+      myPrint i = PrintI64 i $ \i => MkT0 id
   in Main $
-          LetRegion $ \r =>
-          LetRegionValue r (MkI64 123) $ \i =>
-          FunApp "myPrint" myPrint i
--}
+      LetRegion $ \r =>
+      LetRegionValue r (MkI64 123 id) $ \i =>
+      FunApp "myPrint" myPrint i $ \r => r
+
 {-
   done:
     add Int primops
@@ -368,49 +359,53 @@ test_9 =
       LetRegion $ \r =>
       LetRegionValue r sample_box_07 $ \l =>
       FunApp "printList" printList l
+-}
 
 test_10 : Program
 test_10 =
-  let printList : Nat -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.my_ty loc_in -> Exp T0 loc_out
+  let printList : Nat -> {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.my_ty loc_in ew -> Exp T0 loc_out EW
       printList unroll a =
         CaseEither a
           (\l =>
-              PrjFst l $ \hd =>
-              PrjSnd l $ \tl =>
-              LetRegion $ \r =>
-              LetRegionValue r (PrintI64 hd) $ \t0 =>
+              PrjFst l $ \l, hd =>
+              PrjSnd l $ \l, tl =>
+              PrintI64 hd $ \hd =>
+              UnBox tl $ \tl, utl =>
               case unroll of
-                0   => FunApp "printList" (printList 0) $ UnBox tl
-                S i => printList i $ UnBox tl
+                0   => FunApp "printList" (printList 0) utl id
+                S i => printList i utl
           )
-          (\r => MkT0)
+          (\r => MkT0 id)
+
   in Main $
       LetRegion $ \r =>
       LetRegionValue r sample_box_07 $ \l =>
-      FunApp "printList" (printList 2) l
+      PrintValue l $ \l =>
+      FunApp "printList" (printList 2) l $ \l =>
+      l
 
 test_11 : Program
 test_11 =
-  let printList : Nat -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.rev_my_ty loc_in -> Exp T0 loc_out
+  let printList : Nat -> {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.rev_my_ty loc_in ew -> Exp T0 loc_out EW
       printList unroll a =
         CaseEither a
           (\l =>
-              PrjFst l $ \hd =>
-              PrjSnd l $ \tl =>
-              LetRegion $ \r =>
-              LetRegionValue r (PrintI64 tl) $ \t0 =>
+              PrjFst l $ \l, hd =>
+              PrjSnd l $ \l, tl =>
+              PrintI64 tl $ \t0 =>
+              UnBox hd $ \hd, uhd =>
               case unroll of
-                0   => FunApp "printList" (printList 0) $ UnBox hd
-                S i => printList i $ UnBox hd
+                0   => FunApp "printList" (printList 0) uhd id
+                S i => printList i uhd
           )
-          (\r => MkT0)
+          (\r => MkT0 id)
+
   in Main $
       LetRegion $ \r =>
       LetRegionValue r sample_box_17 $ \l =>
-      LetRegion $ \r =>
-      LetRegionValue r (PrintValue l) $ \l2 =>
-      FunApp "printList" (printList 2) l
--}
+      PrintValue l $ \l =>
+      FunApp "printList" (printList 2) l $ \l =>
+      l
 
 test_12 : Program
 test_12 =
@@ -576,6 +571,7 @@ main = do
   putStr !(toBufferDyn sample_tup2_01_sharing2)
   putStr !(toBufferDyn sample_tup2_02)
   -}
+  --_ <- compileProgram "sample_tup2_01_rev_cont" $ Main sample_tup2_01_rev_cont
   _ <- compileProgram "sample_tup2_01" $ Main sample_tup2_01
   _ <- compileProgram "sample_tup2_02" $ Main sample_tup2_02
   {-
@@ -600,10 +596,14 @@ main = do
   --putStr !(toBufferDyn sample_print_either_elim2)
   --putStr !(toBufferDyn sample_print_either_elim5_forward_ind) -- TODO
   --putStr !(toBufferDyn sample_print_either_elim5_backward_ind)
+  _ <- compileProgram "test01" test_1
+  _ <- compileProgram "test02" test_2
+  _ <- compileProgram "test05" test_5
 {-
-  _ <- compileProgram "test11" test_11
   _ <- compileProgram "test8" test_8
 -}
+  _ <- compileProgram "test10" test_10
+  _ <- compileProgram "test11" test_11
   _ <- compileProgram "test12" test_12
   _ <- compileProgram "test13" test_13
   _ <- compileProgram "test14" test_14
