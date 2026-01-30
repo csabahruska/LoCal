@@ -141,6 +141,8 @@ data EndWitness = NoEW | EW -- TODO: index it with Loc
 
       Q: why is CPS good then?
       A: because: a) it avoids explosion b) traversal effect is tracked
+
+      INSIGHT: the direct value style IR express location order directed codegen naturally, so it is better than the CPS IR version
 -}
 
 public export
