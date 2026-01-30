@@ -472,7 +472,7 @@ fillDyn (DeRefPtr {r_in, loc_in} v cont) = do
   MkLocVal {r=r_val} loc_val <- getPointer loc_in
   cur <- genCursor loc_val
   emit "\{cur} = *(char**)\{cur_in}; // DeRefPtr"
-  fillDyn (cont Var r_val loc_val Var)
+  fillDyn (cont Var {r_val, loc_val} Var)
 
 fillDyn (DeRefOffset {r_in, loc_in} v cont) = do
   lift $ putStrLn " ++ DeRefOffset"
@@ -485,7 +485,7 @@ fillDyn (DeRefOffset {r_in, loc_in} v cont) = do
     Yes Refl => do
       cur <- genCursor loc_val
       emit "\{cur} = \{cur_in} + *(int*)\{cur_in}; // DeRefOffset"
-      fillDyn (cont Var loc_val Var)
+      fillDyn (cont Var {loc_val} Var)
 
 {-
   MkLeft  : {a, b : Ty} -> {r_left : _} -> {loc_left : Loc r_left} ->
@@ -545,7 +545,7 @@ fillDyn (PrjSnd {a, b, loc_tup} tup cont) = do
       locSnd = LocAfter b locFst
   _ <- genCursor locSnd
   -- TODO: write test for tuple end-witness creator function
-  fillDyn (cont Var Var (const Var)) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
+  fillDyn (cont Var Var {tup_ew_fun = const Var}) -- Q: is Var unused? why? is the location that track values instead of binder names? A: YES
   -- try to set end-witness for RTup2 if snd was traversed
   maybeSetEndWitness loc_tup locSnd
 
@@ -642,7 +642,7 @@ fillDyn (LetRegionValue {t_val} r v cont) = do
 fillDyn (CaseSTup2 tup cont) = do
   lift $ putStrLn " ++ CaseSTup2"
   fillDyn tup
-  fillDyn $ cont Var (const Var) (const Var)
+  fillDyn $ cont Var (const Var) {tup_ew_fun = const Var}
   {-
   -- create tup end-witness
   let locFst = LocAfterTag "STup2" a loc_tup
@@ -675,7 +675,7 @@ fillDyn (CaseEither {loc_scrut} scrut cont_left cont_right) = do
 
   emit "if (*(char*) \{cur_tag} == 0) { // LEFT"
   (scrut_ew_left, left_cglocal) <- indent $ localScope $ do
-    let expL = cont_left Var (const Var)
+    let expL = cont_left Var {either_ew_fun = const Var}
     fillDyn expL
     emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expL)};"
     scrut_ew <- lookupEndWitness loc_scrut
@@ -685,7 +685,7 @@ fillDyn (CaseEither {loc_scrut} scrut cont_left cont_right) = do
     pure (isJust scrut_ew, !(gets (.local)))
   emit "} else { // RIGHT"
   (scrut_ew_right, right_cglocal) <- indent $ localScope $ do
-    let expR = cont_right Var (const Var)
+    let expR = cont_right Var {either_ew_fun = const Var}
     fillDyn expR
     emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expR)};"
     scrut_ew <- lookupEndWitness loc_scrut

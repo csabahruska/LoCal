@@ -124,14 +124,16 @@ public export
 data EndWitness = NoEW | EW -- TODO: index it with Loc
 
 -- TODO: add linear arrows to guarantee that codegen happens for each expression exactly once
+{-
+  Q: is LoCal program pure and can it be interpreted through data dependencies only where dependecy is sequential due to neighboring locations?
+     does the Exp's operations guarantee dependency serializability through the EW type constraints?
+-}
 
 public export
 data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
 
   -- Q: when to introduce new regions? A: for intermediate values
-  -- OK
   LetRegion : (Region -> Exp t loc ew) -> Exp t loc ew
-  -- OK
   LetRegionValue : {t_val : _} -> (r_val : Region) -> Exp t_val (LocStart t_val r_val) EW -> (Exp t_val (LocStart t_val r_val) EW -> Exp a loc ew) -> Exp a loc ew
 
   MkStaticEW : {t : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {auto _ : Just size = getStaticSize t} ->
@@ -159,7 +161,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
 
   DeRefOffset : {t : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
                  Exp (Offset t) loc_in ew_in ->
-                (Exp (Offset t) loc_in EW -> (loc_val : Loc r_in) -> Exp t loc_val NoEW -> Exp a loc ew) ->
+                (Exp (Offset t) loc_in EW -> {loc_val : Loc r_in} -> Exp t loc_val NoEW -> Exp a loc ew) ->
                                                                                            Exp a loc ew
 
   -- indirection, cross region
@@ -170,16 +172,14 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
 
   DeRefPtr : {t : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
               Exp (Ptr t) loc_in ew_in ->
-             (Exp (Ptr t) loc_in EW -> (r_val : _) -> (loc_val : Loc r_val) -> Exp t loc_val NoEW -> Exp a loc ew) ->
+             (Exp (Ptr t) loc_in EW -> {r_val : _} -> {loc_val : Loc r_val} -> Exp t loc_val NoEW -> Exp a loc ew) ->
                                                                                                      Exp a loc ew
 
   -- boxing
-  -- OK
   MkBox : {x : _} -> {r_box : _} -> {loc_box : Loc r_box} ->
           Exp x loc_box ew_box ->
          (Exp x loc_box ew_box -> Exp (Box x) loc_box ew_box -> Exp a loc ew) ->
                                                                 Exp a loc ew
-  -- OK
   UnBox : {x : _} -> {r_box : _} -> {loc_box : Loc r_box} ->
           Exp (Box x) loc_box ew_box ->
          (Exp (Box x) loc_box ew_box -> Exp x loc_box ew_box -> Exp a loc ew) ->
@@ -192,11 +192,9 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
                                                  Exp a loc ew
 
   -- primitive values
-  -- OK
   MkT0 : {r_val : _} -> {loc_val : Loc r_val} ->
         (Exp T0 loc_val EW -> Exp a loc ew) ->
                               Exp a loc ew
-  -- OK
   MkI64 : Int -> {r_val : _} -> {loc_val : Loc r_val} ->
          (Exp I64 loc_val EW -> Exp a loc ew) ->
                                 Exp a loc ew
@@ -227,7 +225,6 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
    (Exp a locFst EW -> Exp b locSnd ewSnd -> Exp (STup2 a b) loc_tup ewSnd -> Exp o loc ew) ->
                                                                               Exp o loc ew
 
-  -- OK
   MkRTup2 : {a, b, o : Ty} -> {r_tup : _} -> {loc_tup : Loc r_tup} -> {ew, ewSnd : _} -> {loc : _} ->
     let locFst = LocAfterTag "RTup2" a loc_tup in
     let locSnd = LocAfter b locFst in
@@ -237,14 +234,12 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
    (Exp a locFst EW -> Exp b locSnd ewSnd -> Exp (RTup2 a b) loc_tup ewSnd -> Exp o loc ew) ->
                                                                               Exp o loc ew
 
-  -- OK
   MkLeft  : {a, b, o : Ty} -> {r_left : _} -> {loc_left : Loc r_left} -> {ew, ewArg : _} -> {loc : _} ->
     let locArg = LocAfterTag "Left" a loc_left in
     Exp a locArg ewArg ->
    (Exp a locArg ewArg -> Exp (Either a b) loc_left ewArg -> Exp o loc ew) ->
                                                              Exp o loc ew
 
-  -- OK
   MkRight : {a, b, o : Ty} -> {r_right : _} -> {loc_right : Loc r_right} -> {ew, ewArg : _} -> {loc : _} ->
     let locArg = LocAfterTag "Right" b loc_right in
     Exp b locArg ewArg ->
@@ -269,7 +264,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
            let locSnd = LocAfter b locFst in
            ( Exp (RTup2 a b) loc_tup ew_tup ->
              Exp b locSnd ew_tup ->
-             (tup_ew_fun : Exp b locSnd EW -> Exp (RTup2 a b) loc_tup EW) ->
+             {tup_ew_fun : Exp b locSnd EW -> Exp (RTup2 a b) loc_tup EW} ->
              Exp c loc ew
            ) -> Exp c loc ew
 
@@ -282,7 +277,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
                 -- gives access for snd
                 (snd_fun : Exp a locFst EW -> Exp b locSnd ew_tup) ->
                 -- gives end-witness for STup2
-                (tup_ew_fun : Exp b locSnd EW -> Exp (STup2 a b) loc_tup EW) ->
+                {tup_ew_fun : Exp b locSnd EW -> Exp (STup2 a b) loc_tup EW} ->
                 Exp c loc ew
               ) -> Exp c loc ew
 
@@ -297,8 +292,8 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
                Exp (Either a b) loc_scrut ew_scrut ->
                let locL = LocAfterTag "Left" a loc_scrut in
                let locR = LocAfterTag "Right" b loc_scrut in
-               (Exp a locL ew_scrut -> (either_ew_fun : Exp a locL EW -> Exp (Either a b) loc_scrut EW) -> Exp c loc ew) ->
-               (Exp b locR ew_scrut -> (either_ew_fun : Exp b locR EW -> Exp (Either a b) loc_scrut EW) -> Exp c loc ew) ->
+               (Exp a locL ew_scrut -> {either_ew_fun : Exp a locL EW -> Exp (Either a b) loc_scrut EW} -> Exp c loc ew) ->
+               (Exp b locR ew_scrut -> {either_ew_fun : Exp b locR EW -> Exp (Either a b) loc_scrut EW} -> Exp c loc ew) ->
                Exp c loc ew
                -- PROBLEM/TODO: what if the output size differs?
                -- A: there is no problem because the location would be the same and the end witness will be different
