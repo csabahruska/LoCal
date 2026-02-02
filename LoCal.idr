@@ -3,13 +3,12 @@ module LoCal
 public export
 data Ty : Type where
   T0      : Ty
-  STup2   : Ty -> Ty -> Ty   -- serial access only, fst then snd
-  RTup2   : Ty -> Ty -> Ty   -- random access, O(1) access of snd
+  Pair    : Ty -> Ty -> Ty   -- serial access only, fst then snd
   Either  : Ty -> Ty -> Ty
   I64     : Ty
+  -- IDEA: Offset - region local ; Ptr - cross region
   Offset  : Ty -> Ty -- signed pointer offset value
   Ptr     : Ty -> Ty -- raw pointer ; no tag ; just the location data
-  -- IDEA: Offset - region local ; Ptr - cross region
   -- recursive type support
   Box     : Lazy Ty -> Ty
 
@@ -20,14 +19,10 @@ getStaticSize = \case
   I64   => pure 8
   Offset _ => pure 8
   Ptr _ => pure 8
-  STup2 a b => do
+  Pair a b => do
     sa <- getStaticSize a
     sb <- getStaticSize b
     pure (sa + sb)
-  RTup2 a b => do
-    sa <- getStaticSize a
-    sb <- getStaticSize b
-    pure (sa + sb) -- HINT: no indirection is needed when fst static size is known
   Either a b => do
     sa <- getStaticSize a
     sb <- getStaticSize b
@@ -46,7 +41,7 @@ getStaticSize = \case
 
 {-
   REPRESENTATION:
-    - no tag:   I64, STup2, RTup2
+    - no tag:   I64, Pair
     - has tag:  Either
 
   FUTURE WORK:
@@ -152,79 +147,44 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
   LetRegion : (Region -> Exp t loc ew) -> Exp t loc ew
   LetRegionValue : {t_val : _} -> (r_val : Region) -> Exp t_val (LocStart t_val r_val) EW -> (Exp t_val (LocStart t_val r_val) EW -> Exp a loc ew) -> Exp a loc ew
 
-  MkStaticEW : {t : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {auto _ : Just size = getStaticSize t} ->
-               Exp t loc_in _ ->
-              (Exp t loc_in EW -> Exp res loc ew) ->
-                                  Exp res loc ew
+  MkStaticEW : {auto _ : Just size = getStaticSize t} -> Exp t loc NoEW -> Exp t loc EW
 
   -- primops
-  PrintI64 : {r_in : _} -> {loc_in : Loc r_in} ->
-              Exp I64 loc_in _ ->
-             (Exp I64 loc_in EW -> Exp res loc ew) ->
-                                   Exp res loc ew
+  PrintI64 : {ew_in : _} -> {loc_in : _} -> Exp I64 loc_in ew_in -> (() -> Exp t loc ew) -> Exp t loc ew
 
   -- prints the buffer content at the location in hexadecimal ; requires full traversal effect on the argument, so the end-witness should be available
-  PrintValue : {r_in : _} -> {t : _} -> {loc_in : Loc r_in} ->
-                Exp t loc_in EW ->
-               (Exp t loc_in EW -> Exp res loc ew) ->
-                                   Exp res loc ew
+  PrintValue : {loc_in : _} -> Exp t_in loc_in EW -> (() -> Exp t loc ew) -> Exp t loc ew
 
   -- indirection, within same region
-  MkOffset    : {t : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {loc_ofs : Loc r_in} ->
-                 Exp t loc_in ew_in ->
-                (Exp t loc_in ew_in -> Exp (Offset t) loc_ofs EW -> Exp a loc ew) ->
-                                                                    Exp a loc ew
+  MkOffset    : {ew_in : _} -> {r : _} -> {loc, loc_in : Loc r} -> Exp x loc_in ew_in -> Exp (Offset x) loc EW
+  DeRefOffset : {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
+                Exp (Offset x) loc_in ew_in -> ({loc_val : Loc r_in} -> Exp x loc_val NoEW -> Exp a loc ew) -> Exp a loc ew
 
-  DeRefOffset : {t : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
-                 Exp (Offset t) loc_in ew_in ->
-                (Exp (Offset t) loc_in EW -> {loc_val : Loc r_in} -> Exp t loc_val NoEW -> Exp a loc ew) ->
-                                                                                           Exp a loc ew
-
+  {-
+    TODO:
+      - add assertion to throw error on read before write situations, which can happen with forward pointers and dereference
+      - create and example for this case
+      Q: how does this interact with function calls?
+  -}
   -- indirection, cross region
-  MkPtr    : {t : _} -> {r_in : _} -> {r_ptr : _} -> {loc_in : Loc r_in} -> {loc_ptr : Loc r_ptr} ->
-              Exp t loc_in ew_in ->
-             (Exp t loc_in ew_in -> Exp (Ptr t) loc_ptr EW -> Exp a loc ew) ->
-                                                              Exp a loc ew
-
-  DeRefPtr : {t : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
-              Exp (Ptr t) loc_in ew_in ->
-             (Exp (Ptr t) loc_in EW -> {r_val : _} -> {loc_val : Loc r_val} -> Exp t loc_val NoEW -> Exp a loc ew) ->
-                                                                                                     Exp a loc ew
+  MkPtr    : {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp x loc_in ew_in -> Exp (Ptr x) loc EW
+  DeRefPtr : {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
+             Exp (Ptr x) loc_in ew_in -> ({r_val : _} -> {loc_val : Loc r_val} -> Exp x loc_val NoEW -> Exp a loc ew) -> Exp a loc ew
 
   -- boxing
-  MkBox : {x : _} -> {r_box : _} -> {loc_box : Loc r_box} ->
-          Exp x loc_box ew_box ->
-         (Exp x loc_box ew_box -> Exp (Box x) loc_box ew_box -> Exp a loc ew) ->
-                                                                Exp a loc ew
-  UnBox : {x : _} -> {r_box : _} -> {loc_box : Loc r_box} ->
-          Exp (Box x) loc_box ew_box ->
-         (Exp (Box x) loc_box ew_box -> Exp x loc_box ew_box -> Exp a loc ew) ->
-                                                                Exp a loc ew
+  MkBox : Exp t loc ew -> Exp (Box t) loc ew
+  UnBox : Exp (Box t) loc ew -> Exp t loc ew
 
   -- to copy values cross region ; requires full traversal effect on the argument, so the end-witness should be available
-  Copy : {t : _} -> {r_in, r_copy : _} -> {loc_in : Loc r_in} -> {loc_copy : Loc r_copy} ->
-         Exp t loc_in EW ->
-        (Exp t loc_in EW -> Exp t loc_copy EW -> Exp a loc ew) ->
-                                                 Exp a loc ew
+  Copy : {loc_in : _} -> Exp t loc_in EW -> Exp t loc EW
 
   -- primitive values
-  MkT0 : {r_val : _} -> {loc_val : Loc r_val} ->
-        (Exp T0 loc_val EW -> Exp a loc ew) ->
-                              Exp a loc ew
-  MkI64 : Int -> {r_val : _} -> {loc_val : Loc r_val} ->
-         (Exp I64 loc_val EW -> Exp a loc ew) ->
-                                Exp a loc ew
+  MkT0  : Exp T0 loc EW
+  MkI64 : Int -> Exp I64 loc EW
 
   -- I64 primops
-  AddI64 : {r_in, r_in2, r_res : _} -> {loc_in : Loc r_in} -> {loc_in2 : Loc r_in2} -> {loc_res : Loc r_res} ->
-           Exp I64 loc_in ew1 -> Exp I64 loc_in2 ew2 ->
-          (Exp I64 loc_in EW  -> Exp I64 loc_in2 EW  -> Exp I64 loc_res EW -> Exp a loc ew) ->
-                                                                              Exp a loc ew
-
-  EqI64  : {r_in, r_in2, r_res : _} -> {loc_in : Loc r_in} -> {loc_in2 : Loc r_in2} -> {loc_res : Loc r_res} ->
-           Exp I64 loc_in ew1 -> Exp I64 loc_in2 ew2 ->
-          (Exp I64 loc_in EW  -> Exp I64 loc_in2 EW  -> Exp (Either T0 T0) loc_res EW -> Exp a loc ew) ->
-                                                                                         Exp a loc ew
+  AddI64 : {ew1, ew2 : _} -> {loc_in1, loc_in2 : _} -> Exp I64 loc_in1 ew1 -> Exp I64 loc_in2 ew2 -> Exp I64 loc EW
+  EqI64  : {ew1, ew2 : _} -> {loc_in1, loc_in2 : _} -> Exp I64 loc_in1 ew1 -> Exp I64 loc_in2 ew2 -> Exp (Either T0 T0) loc EW
 
   -- value shapes, ADT can be modeled with these
   {-
@@ -234,65 +194,38 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
       - the Exp size could be used to define the region size also
   -}
 
-  MkSTup2 : {a, b, o : Ty} -> {r_tup : _} -> {loc_tup : Loc r_tup} -> {ew, ewSnd : _} -> {loc : _} ->
-    let locFst = LocAfterTag "STup2" a loc_tup in
+  MkPair : {a, b : Ty} -> {loc : _} -> {ew : _} ->
+    let locFst = LocAfterTag "Pair" a loc in
     let locSnd = LocAfter b locFst in
-    Exp a locFst EW -> Exp b locSnd ewSnd ->
-   (Exp a locFst EW -> Exp b locSnd ewSnd -> Exp (STup2 a b) loc_tup ewSnd -> Exp o loc ew) ->
-                                                                              Exp o loc ew
+    Exp a locFst EW -> Exp b locSnd ew -> Exp (Pair a b) loc ew
 
-  MkRTup2 : {a, b, o : Ty} -> {r_tup : _} -> {loc_tup : Loc r_tup} -> {ew, ewSnd : _} -> {loc : _} ->
-    let locFst = LocAfterTag "RTup2" a loc_tup in
-    let locSnd = LocAfter b locFst in
-    -- Q: can we create values without creating end-witness at all?
-    Exp a locFst EW -> Exp b locSnd ewSnd ->
-   (Exp a locFst EW -> Exp b locSnd ewSnd -> Exp (RTup2 a b) loc_tup ewSnd -> Exp o loc ew) ->
-                                                                              Exp o loc ew
+  MkLeft  : {a, b : Ty} -> {loc : _} -> {ew : _} ->
+    let locArg = LocAfterTag "Left" a loc in
+    Exp a locArg ew -> Exp (Either a b) loc ew
 
-  MkLeft  : {a, b, o : Ty} -> {r_left : _} -> {loc_left : Loc r_left} -> {ew, ewArg : _} -> {loc : _} ->
-    let locArg = LocAfterTag "Left" a loc_left in
-    Exp a locArg ewArg ->
-   (Exp a locArg ewArg -> Exp (Either a b) loc_left ewArg -> Exp o loc ew) ->
-                                                             Exp o loc ew
-
-  MkRight : {a, b, o : Ty} -> {r_right : _} -> {loc_right : Loc r_right} -> {ew, ewArg : _} -> {loc : _} ->
-    let locArg = LocAfterTag "Right" b loc_right in
-    Exp b locArg ewArg ->
-   (Exp b locArg ewArg -> Exp (Either a b) loc_right ewArg -> Exp o loc ew) ->
-                                                              Exp o loc ew
+  MkRight : {a, b : Ty} -> {loc : _} -> {ew : _} ->
+    let locArg = LocAfterTag "Right" b loc in
+    Exp b locArg ew -> Exp (Either a b) loc ew
 
 {-
   TODO:
     every data access needs to be tested to Ind and do the dereference for it
     INSIGHT: sharing poisons code, because requires interpretation
 -}
-  -- random access tup2
-  PrjFst : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup} -> {ew, ew_tup : _} -> {loc : _} ->
-           Exp (RTup2 a b) loc_tup ew_tup ->
-           let locFst = LocAfterTag "RTup2" a loc_tup in
-          (Exp (RTup2 a b) loc_tup ew_tup -> Exp a locFst EW -> Exp c loc ew) ->
-                                                                Exp c loc ew
-
-  PrjSnd : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup} -> {ew, ew_tup : _} -> {loc : _} ->
-           Exp (RTup2 a b) loc_tup ew_tup ->
-           let locFst = LocAfterTag "RTup2" a loc_tup in
-           let locSnd = LocAfter b locFst in
-           ( Exp (RTup2 a b) loc_tup ew_tup ->
-             Exp b locSnd ew_tup ->
-             {tup_ew_fun : Exp b locSnd EW -> Exp (RTup2 a b) loc_tup EW} ->
-             Exp c loc ew
-           ) -> Exp c loc ew
+  -- RTup2 a b   = STup2 (Offset b) (STup2 a b)
+  -- RTup3 a b c = STup2 (Offset b) (STup2 (Offset c) (STup2 a (STup2 b c)))
+  -- TODO: rename STup2 to Pair
 
   -- serial access tup2
-  CaseSTup2 : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup} -> {ew_tup, ew : _} -> {loc : _} ->
-              Exp (STup2 a b) loc_tup ew_tup ->
-              let locFst = LocAfterTag "STup2" a loc_tup in
+  CasePair : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup} -> {ew_tup, ew : _} -> {loc : _} ->
+              Exp (Pair a b) loc_tup ew_tup ->
+              let locFst = LocAfterTag "Pair" a loc_tup in
               let locSnd = LocAfter b locFst in
               ( Exp a locFst NoEW ->
                 -- gives access for snd
                 (snd_fun : Exp a locFst EW -> Exp b locSnd ew_tup) ->
-                -- gives end-witness for STup2
-                {tup_ew_fun : Exp b locSnd EW -> Exp (STup2 a b) loc_tup EW} ->
+                -- gives end-witness for Pair
+                {tup_ew_fun : Exp b locSnd EW -> Exp (Pair a b) loc_tup EW} ->
                 Exp c loc ew
               ) -> Exp c loc ew
 
@@ -305,7 +238,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
 -}
   CaseEither : {r_scrut : _} -> {a, b, c : Ty} -> {loc_scrut : Loc r_scrut} -> {ew_scrut, ew : _} -> {loc : _} ->
                Exp (Either a b) loc_scrut ew_scrut ->
-               let locL = LocAfterTag "Left" a loc_scrut in
+               let locL = LocAfterTag "Left"  a loc_scrut in
                let locR = LocAfterTag "Right" b loc_scrut in
                (Exp a locL ew_scrut -> {either_ew_fun : Exp a locL EW -> Exp (Either a b) loc_scrut EW} -> Exp c loc ew) ->
                (Exp b locR ew_scrut -> {either_ew_fun : Exp b locR EW -> Exp (Either a b) loc_scrut EW} -> Exp c loc ew) ->
@@ -314,21 +247,67 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
                -- A: there is no problem because the location would be the same and the end witness will be different
                -- IDEAS: is the result size an Either Int Int?
 
-  FunApp : {r_arg, r_res : _} -> {t_arg, res : _} -> {loc_arg : Loc r_arg} -> {loc_res : Loc r_res} ->
+  FunApp : {r_arg, r_res : _} -> {t_arg, res : _} -> {loc_arg : Loc r_arg} -> {loc_res : Loc r_res} -> {ew_arg : _} ->
            String ->
            --(fun_def : Exp t_arg loc_arg ew_arg -> (Exp t_arg loc_arg ew_arg_out, Exp res loc_res EW)) ->
-           (fun_def : Exp t_arg loc_arg ew_arg -> Exp res loc_res EW) ->
+           (fun_def : Exp t_arg loc_arg NoEW -> Exp res loc_res EW) ->
            Exp t_arg loc_arg ew_arg ->
            --(Exp t_arg loc_arg ew_arg_out -> Exp res loc_res EW -> Exp c loc ew) ->
            (Exp res loc_res EW -> Exp c loc ew) ->
            Exp c loc ew
 
   -- internal
-  Var : {t_var : _} -> {r_var : _} -> {loc_var : Loc r_var} -> Exp t_var loc_var ew
+  Var : Exp t loc ew
+
+  InheritEW : {r_in : _} -> {loc_in : Loc r_in} -> Exp a loc_in EW -> Exp b loc EW
+
+  AddLocAfter : {b : _} -> {locFst : _} -> Exp a locFst EW -> Exp b (LocAfter b locFst) ew
+
 
 public export
 data Program : Type where
   Main  : {res : Ty} -> Exp res (LocStart res (MkRegion (-1))) EW -> Program
+
+--export infixr 5 #
+export infixr 5 ##
+
+%inline
+(#) : Ty -> Ty -> Ty
+(#) a b = Pair a b
+
+%inline
+(##) : {a, b : Ty} -> {loc : _} -> {ew : _} ->
+    let locFst = LocAfterTag "Pair" a loc in
+    let locSnd = LocAfter b locFst in
+    Exp a locFst EW -> Exp b locSnd ew -> Exp (Pair a b) loc ew
+
+(##) = MkPair
+
+{-
+sample_tup2_01 : {r : _} -> {loc : Loc r} -> Exp (Offset I64 # I64 # I64) loc EW
+sample_tup2_01 = let a = MkI64' 102 in MkOffset a ## MkI64 12 ## MkI64 103
+
+sample_tup2_02 : {r : _} -> {loc : Loc r} -> Exp (I64 # Offset I64 # I64 # I64) loc EW
+sample_tup2_02 = let a = MkI64 102 in a ## MkOffset a ## a ## MkI64 103
+-}
+
+-- TODO: codegen this
+sample_tup2_03 : {r : _} -> {loc : Loc r} -> Exp (I64 # Offset I64 # I64 # I64) loc EW
+sample_tup2_03 = let a = MkI64 102 in MkPair (Copy a) $ MkPair (MkOffset a) $ MkPair ( a) $ MkI64 103
+{-
+sample_tup2_03_err : {r : _} -> {loc : Loc r} -> Exp (I64 # Offset I64 # I64 # I64) loc EW
+sample_tup2_03_err = let a = MkI64 102 in MkPair a $ MkPair (MkOffset a) $ MkPair a $ MkI64 103
+-}
+sample_a : {r : _} -> {loc : Loc r} -> Exp I64 loc EW
+sample_a = MkI64 102
+
+{-
+sample_tup2_03_err : {r : _} -> {loc : Loc r} -> Exp (I64 # I64) loc EW
+sample_tup2_03_err = let a = MkI64 102 in MkPair a a
+-}
+
+sample_tup2_04 : {r : _} -> {loc : Loc r} -> Exp (I64 # I64) loc EW
+sample_tup2_04 = MkPair sample_a sample_a
 
 -- -------------------------------
 

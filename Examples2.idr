@@ -12,109 +12,79 @@ import Dynamic
 
 mutual
   my_ty : Ty
-  my_ty = Either (RTup2 I64 my_ty_box) T0
+  my_ty = Either (Pair I64 my_ty_box) T0
 
   my_ty_box : Ty
   my_ty_box = Box my_ty
 
 sample_box_03 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc EW
-sample_box_03 =
-  MkT0 $ \t0 =>
-  MkRight t0 $ \t0, e => e
+sample_box_03 = MkRight MkT0
 
 sample_box_04 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty_box loc EW
-sample_box_04 = MkBox sample_box_03 $ \u, b => b
+sample_box_04 = MkBox sample_box_03
 
 sample_box_05 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc EW
-sample_box_05 = UnBox sample_box_04 $ \b, u => u
+sample_box_05 = UnBox sample_box_04
 
 sample_box_06 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc EW
-sample_box_06 =
-  MkI64 1 $ \i =>
-  MkRTup2 i sample_box_04 $ \f, s, t =>
-  MkLeft t $ \t, e => e
+sample_box_06 = MkLeft $ MkPair (MkI64 1) sample_box_04
 
 sample_box_07 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc EW
-sample_box_07 =
-  MkI64 2 $ \i =>
-  MkBox sample_box_06 $ \_, b =>
-  MkRTup2 i b $ \f, s, t =>
-  MkLeft t $ \t, e => e
-
+sample_box_07 = MkLeft $ MkPair (MkI64 2) $ MkBox sample_box_06
 
 -- data IntList = Cons IntList Int
 --              | Nil
 
 mutual
   rev_my_ty : Ty
-  rev_my_ty = Either (RTup2 rev_my_ty_box I64) T0
+  rev_my_ty = Either (Pair (Offset I64) $ Pair rev_my_ty_box I64) T0
 
   rev_my_ty_box : Ty
   rev_my_ty_box = Box rev_my_ty
 
 sample_box_13 : {r : _} -> {loc : Loc r} -> Exp Examples2.rev_my_ty loc EW
-sample_box_13 =
-  MkT0 $ \t0 =>
-  MkRight t0 $ \t0, e => e
+sample_box_13 = MkRight MkT0
 
 sample_box_14 : {r : _} -> {loc : Loc r} -> Exp Examples2.rev_my_ty_box loc EW
-sample_box_14 = MkBox sample_box_13 $ \u, b => b
+sample_box_14 = MkBox sample_box_13
 
 sample_box_15 : {r : _} -> {loc : Loc r} -> Exp Examples2.rev_my_ty loc EW
-sample_box_15 = UnBox sample_box_14 $ \b, u => u
+sample_box_15 = UnBox sample_box_14
 
 sample_box_16 : {r : _} -> {loc : Loc r} -> Exp Examples2.rev_my_ty loc EW
-sample_box_16 =
-  MkBox sample_box_13 $ \_, b =>
-  MkI64 1 $ \i =>
-  MkRTup2 b i $ \f, s, t =>
-  MkLeft t $ \t, e => e
+sample_box_16 = MkLeft $ let i = MkI64 1 in MkPair (MkOffset i) $ MkPair (MkBox sample_box_13) i
 
 sample_box_17 : {r : _} -> {loc : Loc r} -> Exp Examples2.rev_my_ty loc EW
-sample_box_17 =
-  MkBox sample_box_16 $ \_, b =>
-  MkI64 2 $ \i =>
-  MkRTup2 b i $ \f, s, t =>
-  MkLeft t $ \t, e => e
+sample_box_17 = MkLeft $ let i = MkI64 2 in MkPair (MkOffset i) $ MkPair (MkBox sample_box_16) i
 
 -------------------------------------------
 -- END of boxing experiment
 -------------------------------------------
 
 i64 : {r : _} -> {loc : Loc r} -> Exp I64 loc EW
-i64 = MkI64 1 id
+i64 = MkI64 1
 
-sample_tup2_01_rev_cont : {r : _} -> {loc : Loc r} -> Exp (RTup2 I64 I64) loc EW
-sample_tup2_01_rev_cont =
-  -- create i64 values
-  MkI64 102 $ \i2 =>
-  MkI64 101 $ \i1 =>
-  MkRTup2 i1 i2 $ \i1, i2, rt => rt
-
-sample_tup2_01 : {r : _} -> {loc : Loc r} -> Exp (RTup2 I64 I64) loc EW
+sample_tup2_01 : {r : _} -> {loc : Loc r} -> Exp (Pair I64 I64) loc EW
 sample_tup2_01 =
   -- create i64 values
-  MkI64 101 $ \i1 =>
-  MkI64 102 $ \i2 =>
-  MkRTup2 i1 i2 $ \i1, i2, rt => rt
+  let i1 = MkI64 101 in
+  let i2 = MkI64 102 in
+  MkPair i1 i2
 
-{-
-sample_tup2_01_sharing : {loc : _} -> Exp (RTup2 I64 (Offset I64)) loc
+sample_tup2_01_sharing : {r : _} -> {loc : Loc r} -> Exp (Pair I64 (Offset I64)) loc EW
 sample_tup2_01_sharing =
   -- create i64 values
   let i1 = MkI64 101 in
-  MkRTup2 i1 (MkOffset i1)
+  MkPair i1 (MkOffset i1)
 
-sample_tup2_01_sharing2 : {loc : _} -> Exp (RTup2 (Offset I64) I64) loc
+sample_tup2_01_sharing2 : {r : _} -> {loc : Loc r} -> Exp (Pair (Offset I64) I64) loc EW
 sample_tup2_01_sharing2 =
   -- create i64 values
   let i1 = MkI64 101 in
-  MkRTup2 (MkOffset i1) i1
+  MkPair (MkOffset i1) i1
 
--}
-
-sample_tup2_02 : {r : _} -> {loc : Loc r} -> Exp (RTup2 (RTup2 I64 I64) (RTup2 I64 I64)) loc EW
-sample_tup2_02 = MkRTup2 sample_tup2_01 sample_tup2_01 $ \_,_, t => t
+sample_tup2_02 : {r : _} -> {loc : Loc r} -> Exp (Pair (Pair I64 I64) (Pair I64 I64)) loc EW
+sample_tup2_02 = MkPair sample_tup2_01 sample_tup2_01
 {-
 sample_print_snd_fst : {loc_out : _} -> Exp T0 loc_out
 sample_print_snd_fst =
@@ -207,6 +177,7 @@ sample_print_either_elim5_backward_ind =
   let i1 = MkI64 44 in
   MkRTup2 (MkRTup2 i1 v1) (MkOffset i1)
 -}
+{-
 test_1 : Program
 test_1 = Main $
   MkI64 123 $ \i =>
@@ -228,7 +199,7 @@ test_5 =
       LetRegion $ \r =>
       LetRegionValue r (MkI64 123 id) $ \i =>
       FunApp "myPrint" myPrint i $ \r => r
-
+-}
 {-
   done:
     add Int primops
@@ -360,7 +331,7 @@ test_9 =
       LetRegionValue r sample_box_07 $ \l =>
       FunApp "printList" printList l
 -}
-
+{-
 test_10 : Program
 test_10 =
   let printList : Nat -> {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.my_ty loc_in ew -> Exp T0 loc_out EW
@@ -406,21 +377,22 @@ test_11 =
       PrintValue l $ \l =>
       FunApp "printList" (printList 2) l $ \l =>
       l
+-}
 
 test_12 : Program
 test_12 =
-  let genList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp I64 loc_in EW -> Exp Examples2.rev_my_ty loc_out EW
+  let genList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp I64 loc_in NoEW -> Exp Examples2.rev_my_ty loc_out EW
       genList i =
         LetRegion $ \r =>
-        LetRegionValue r (MkI64 10 id) $ \ten =>
+        LetRegionValue r (MkI64 10) $ \ten =>
         LetRegion $ \r =>
-        LetRegionValue r (EqI64 ten i $ \_,_,b => b) $ \b =>
+        LetRegionValue r (EqI64 ten i) $ \b =>
         CaseEither b
           (\f =>
               LetRegion $ \r =>
-              LetRegionValue r (MkI64 1 id) $ \one =>
+              LetRegionValue r (MkI64 1) $ \one =>
               LetRegion $ \r =>
-              LetRegionValue r (AddI64 one i $ \_, _, a => a) $ \next =>
+              LetRegionValue r (AddI64 one i) $ \next =>
               -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
               -- TODO: what should create the end-witness for COPY?
               -- Q: what should be the rules for end-witness construction?
@@ -437,123 +409,96 @@ test_12 =
               -}
               -- working
               FunApp "genList" genList next $ \res =>
-              Copy i $ \i, i_copy =>
-              -- TODO: create a simple RTup2 I64 I64 example to reproduce this problem
-              ------------------------------------------
-
-              MkBox res $ \res, bres =>
-              MkRTup2 bres i_copy $ \bres, i_copy, t =>
-              MkLeft t $ \t, e => e
+              MkLeft $ let i = Copy $ MkStaticEW i in MkPair (MkOffset i) $ MkPair (MkBox res) i
           )
-          (\t => MkT0 $ \t0 => MkRight t0 $ \t0, e => e)
+          (\t => MkRight MkT0)
 
       printList : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.rev_my_ty loc_in ew -> Exp T0 loc_out EW
       printList a =
         CaseEither a
           (\l =>
-              PrjFst l $ \l, tl =>
-              PrjSnd l $ \l, hd =>
-              PrintI64 hd $ \t0 =>
-              UnBox tl $ \tl, utl =>
-              FunApp "printList" printList utl id
+              CasePair l $ \ofs, list_fun =>
+              let lst = list_fun $ MkStaticEW ofs in
+              CasePair lst $ \lst, snd_fun =>
+              DeRefOffset ofs $ \i =>
+              PrintI64 i $ \_ =>
+              FunApp "printList" printList (UnBox lst) id
           )
-          (\r => MkT0 id)
+          (\r => MkT0)
 
   in Main $
       LetRegion $ \r =>
-      LetRegionValue r (MkI64 1 id) $ \i =>
+      LetRegionValue r (MkI64 1) $ \i =>
       LetRegion $ \r =>
       LetRegionValue r (FunApp "genList" genList i id) $ \l =>
-      PrintValue l $ \l =>
+      PrintValue l $ \_ =>
       FunApp "printList" printList l $ \l =>
       l
 
 test_13 : Program
 test_13 = Main $
       LetRegion $ \r =>
-      LetRegionValue r (
-        MkI64 9 $ \i1 =>
-        MkOffset i1 $ \i1, p1 =>
-        MkRTup2 i1 p1 $ \i1, p1, v => v
-      ) $ \v =>
-      PrintValue v $ \v =>
-      PrjFst v $ \v, i2 =>
-      PrjSnd v $ \v, i3 =>
-      DeRefOffset i3 $ \i3, i4 =>
-      PrintI64 i4 $ \i4 =>
-      MkT0 $ \t0 => t0
+      LetRegionValue r (let i1 = MkI64 9 in MkPair i1 (MkOffset i1)) $ \v =>
+      PrintValue v $ \_ =>
+      CasePair v $ \i2, snd_fun =>
+      let i3 = snd_fun (MkStaticEW i2) in
+      DeRefOffset i3 $ \i4 =>
+      PrintI64 i4 $ \_ =>
+      MkT0
 
 test_14 : Program
 test_14 = Main $
       LetRegion $ \r =>
-      LetRegionValue r (
-        MkI64 9 $ \i1 =>
-        MkPtr i1 $ \i1, p1 =>
-        MkRTup2 i1 p1 $ \i1, p1, v => v
-      ) $ \v =>
-      PrintValue v $ \v =>
-      PrjFst v $ \v, i2 =>
-      PrjSnd v $ \v, i3 =>
-      DeRefPtr i3 $ \i3, i4 =>
-      PrintI64 i4 $ \i4 =>
-      MkT0 $ \t0 => t0
+      LetRegionValue r (let i1 = MkI64 9 in MkPair i1 (MkPtr i1)) $ \v =>
+      PrintValue v $ \_ =>
+      CasePair v $ \i2, snd_fun =>
+      let i3 = snd_fun (MkStaticEW i2) in
+      DeRefPtr i3 $ \i4 =>
+      PrintI64 i4 $ \_ =>
+      MkT0
 
 test_15 : Program
 test_15 =
-  let printPair : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp (STup2 I64 I64) loc_in ew -> Exp T0 loc_out EW
+  let printPair : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp (Pair I64 I64) loc_in ew -> Exp T0 loc_out EW
       printPair p =
-        CaseSTup2 p $ \fst, snd_fun =>
+        CasePair p $ \fst, snd_fun =>
         PrintI64 fst $ \fst =>
-        MkT0 $ \t0 => t0
+        MkT0
   in Main $
       LetRegion $ \r =>
-      LetRegionValue r (
-        MkI64 7 $ \i1 =>
-        MkI64 8 $ \i2 =>
-        MkSTup2 i1 i2 $ \i1, i2, t1 => t1
-      ) $ \t1 =>
+      LetRegionValue r (MkPair (MkI64 7) (MkI64 8)) $ \t1 =>
       FunApp "printPair" printPair t1 $ \res =>
       res
 
 test_16 : Program
 test_16 =
-  let printPair : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp (STup2 I64 I64) loc_in ew -> Exp T0 loc_out EW
+  let printPair : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp (Pair I64 I64) loc_in ew -> Exp T0 loc_out EW
       printPair p =
-        CaseSTup2 p $ \fst, snd_fun =>
-        PrintI64 fst $ \fst =>
-        let snd = snd_fun fst in
-        PrintI64 snd $ \snd =>
-        MkT0 $ \t0 => t0
+        CasePair p $ \fst, snd_fun =>
+        PrintI64 fst $ \_ =>
+        let snd = snd_fun (MkStaticEW fst) in
+        PrintI64 snd $ \_ =>
+        MkT0
   in Main $
       LetRegion $ \r =>
-      LetRegionValue r (
-        MkI64 7 $ \i1 =>
-        MkI64 8 $ \i2 =>
-        MkSTup2 i1 i2 $ \i1, i2, t1 => t1
-      ) $ \t1 =>
+      LetRegionValue r (MkPair (MkI64 7) (MkI64 8)) $ \t1 =>
       FunApp "printPair" printPair t1 $ \res =>
       res
 
 test_17 : Program
 test_17 =
-  let printPair : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp (STup2 I64 I64) loc_in ew -> Exp T0 loc_out EW
+  let printPair : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp (Pair I64 I64) loc_in ew -> Exp T0 loc_out EW
       printPair p =
-        CaseSTup2 p $ \fst, snd_fun =>
-        MkStaticEW fst $ \fst =>
-        let snd = snd_fun fst in
-        PrintI64 snd $ \snd =>
-        PrintI64 fst $ \fst =>
-        MkT0 $ \t0 => t0
+        CasePair p $ \fst, snd_fun =>
+        let snd = snd_fun (MkStaticEW fst) in
+        PrintI64 snd $ \_ =>
+        PrintI64 fst $ \_ =>
+        MkT0
   in Main $
       LetRegion $ \r =>
-      LetRegionValue r (
-        MkI64 7 $ \i1 =>
-        MkI64 8 $ \i2 =>
-        MkSTup2 i1 i2 $ \i1, i2, t1 => t1
-      ) $ \t1 =>
+      LetRegionValue r (MkPair (MkI64 7) (MkI64 8)) $ \t1 =>
       FunApp "printPair" printPair t1 $ \res =>
       res
-
 
 -- test
 
@@ -596,14 +541,18 @@ main = do
   --putStr !(toBufferDyn sample_print_either_elim2)
   --putStr !(toBufferDyn sample_print_either_elim5_forward_ind) -- TODO
   --putStr !(toBufferDyn sample_print_either_elim5_backward_ind)
+  {-
   _ <- compileProgram "test01" test_1
   _ <- compileProgram "test02" test_2
   _ <- compileProgram "test05" test_5
-{-
+  -}
+  {-
   _ <- compileProgram "test8" test_8
--}
+  -}
+  {-
   _ <- compileProgram "test10" test_10
   _ <- compileProgram "test11" test_11
+  -}
   _ <- compileProgram "test12" test_12
   _ <- compileProgram "test13" test_13
   _ <- compileProgram "test14" test_14
