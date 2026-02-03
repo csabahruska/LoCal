@@ -408,7 +408,8 @@ test_12 =
               FunApp "genList" genList next $ \res =>
               -}
               -- working
-              FunApp "genList" genList next $ \res =>
+              let res = FunApp2 "genList" genList next in
+              --FunApp "genList" genList next $ \res =>
               MkLeft $ let i = Copy $ MkStaticEW i in MkPair (MkOffset i) $ MkPair (MkBox res) i
           )
           (\t => MkRight MkT0)

@@ -256,6 +256,14 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
            (Exp res loc_res EW -> Exp c loc ew) ->
            Exp c loc ew
 
+  FunApp2 : {r_arg, r_res : _} -> {t_arg, res : _} -> {loc_arg : Loc r_arg} -> {loc_res : Loc r_res} -> {ew_arg : _} ->
+           String ->
+           --(fun_def : Exp t_arg loc_arg ew_arg -> (Exp t_arg loc_arg ew_arg_out, Exp res loc_res EW)) ->
+           (fun_def : Exp t_arg loc_arg NoEW -> Exp res loc_res EW) ->
+           Exp t_arg loc_arg ew_arg ->
+           --(Exp t_arg loc_arg ew_arg_out -> Exp res loc_res EW -> Exp c loc ew) ->
+           Exp res loc_res EW
+
   -- internal
   Var : Exp t loc ew
 
