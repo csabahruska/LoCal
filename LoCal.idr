@@ -80,7 +80,7 @@ data Loc : (r : Region) -> Type where
 
 {-
   mvp simplifications:
-    - only tup2 and either ; product and sum type
+    - only pair and either ; product and sum type
     - only I64 interger primitive type
     - functions with only single argument
     - no sharing
@@ -147,48 +147,19 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
   LetRegion : (Region -> Exp t loc ew) -> Exp t loc ew
   LetRegionValue : {t_val : _} -> (r_val : Region) -> Exp t_val (LocStart t_val r_val) EW -> (Exp t_val (LocStart t_val r_val) EW -> Exp a loc ew) -> Exp a loc ew
 
-  MkStaticEW : {auto _ : Just size = getStaticSize t} -> Exp t loc NoEW -> Exp t loc EW
+  MkStaticEW : {ew_in : _} -> {auto _ : Just size = getStaticSize t} -> Exp t loc ew_in -> Exp t loc EW
 
-  -- primops
-  PrintI64 : {ew_in : _} -> {loc_in : _} -> Exp I64 loc_in ew_in -> (() -> Exp t loc ew) -> Exp t loc ew
-
-  -- prints the buffer content at the location in hexadecimal ; requires full traversal effect on the argument, so the end-witness should be available
-  PrintValue : {loc_in : _} -> Exp t_in loc_in EW -> (() -> Exp t loc ew) -> Exp t loc ew
-
-  -- indirection, within same region
-  MkOffset    : {ew_in : _} -> {r : _} -> {loc, loc_in : Loc r} -> Exp x loc_in ew_in -> Exp (Offset x) loc EW
-  DeRefOffset : {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
-                Exp (Offset x) loc_in ew_in -> ({loc_val : Loc r_in} -> Exp x loc_val NoEW -> Exp a loc ew) -> Exp a loc ew
-
-  {-
-    TODO:
-      - add assertion to throw error on read before write situations, which can happen with forward pointers and dereference
-      - create and example for this case
-      Q: how does this interact with function calls?
-  -}
-  -- indirection, cross region
-  MkPtr    : {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp x loc_in ew_in -> Exp (Ptr x) loc EW
-  DeRefPtr : {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
-             Exp (Ptr x) loc_in ew_in -> ({r_val : _} -> {loc_val : Loc r_val} -> Exp x loc_val NoEW -> Exp a loc ew) -> Exp a loc ew
+  -- to copy values cross region ; requires full traversal effect on the argument, so the end-witness should be available
+  Copy : {loc_in : _} -> Exp t loc_in EW -> Exp t loc EW
 
   -- boxing
   MkBox : Exp t loc ew -> Exp (Box t) loc ew
   UnBox : Exp (Box t) loc ew -> Exp t loc ew
 
-  -- to copy values cross region ; requires full traversal effect on the argument, so the end-witness should be available
-  Copy : {loc_in : _} -> Exp t loc_in EW -> Exp t loc EW
-
-  -- primitive values
-  MkT0  : Exp T0 loc EW
-  MkI64 : Int -> Exp I64 loc EW
-
-  -- I64 primops
-  AddI64 : {ew1, ew2 : _} -> {loc_in1, loc_in2 : _} -> Exp I64 loc_in1 ew1 -> Exp I64 loc_in2 ew2 -> Exp I64 loc EW
-  EqI64  : {ew1, ew2 : _} -> {loc_in1, loc_in2 : _} -> Exp I64 loc_in1 ew1 -> Exp I64 loc_in2 ew2 -> Exp (Either T0 T0) loc EW
 
   -- value shapes, ADT can be modeled with these
   {-
-    MkTup2 is the only place that introduces after relation between locations
+    MkPair is the only place that introduces after relation between locations
     IDEA:
       - instead of LocAfter Ty we should use size which should be included in the Exp
       - the Exp size could be used to define the region size also
@@ -212,11 +183,11 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
     every data access needs to be tested to Ind and do the dereference for it
     INSIGHT: sharing poisons code, because requires interpretation
 -}
-  -- RTup2 a b   = STup2 (Offset b) (STup2 a b)
-  -- RTup3 a b c = STup2 (Offset b) (STup2 (Offset c) (STup2 a (STup2 b c)))
-  -- TODO: rename STup2 to Pair
+  -- RTup2 a b   = Pair (Offset b) (Pair a b)
+  -- RTup3 a b c = Pair (Offset b) (Pair (Offset c) (Pair a (Pair b c)))
+  -- RTup3 a b c = Offset b # Offset c # a # b # c
 
-  -- serial access tup2
+  -- serial access pair
   CasePair : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup} -> {ew_tup, ew : _} -> {loc : _} ->
               Exp (Pair a b) loc_tup ew_tup ->
               let locFst = LocAfterTag "Pair" a loc_tup in
@@ -263,6 +234,54 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
            Exp t_arg loc_arg ew_arg ->
            --(Exp t_arg loc_arg ew_arg_out -> Exp res loc_res EW -> Exp c loc ew) ->
            Exp res loc_res EW
+
+  FunApp2Arg :
+           {ew_arg1 : _} -> {t_arg1 : _} -> {r_arg1 : _} -> {loc_arg1 : Loc r_arg1} ->
+           {ew_arg2 : _} -> {t_arg2 : _} -> {r_arg2 : _} -> {loc_arg2 : Loc r_arg2} ->
+           {res : _} -> {r_res : _} -> {loc_res : Loc r_res} ->
+           String ->
+           (fun_def : Exp t_arg1 loc_arg1 NoEW -> Exp t_arg2 loc_arg2 NoEW -> Exp res loc_res EW) ->
+           Exp t_arg1 loc_arg1 ew_arg1 -> Exp t_arg2 loc_arg2 ew_arg2 ->
+           Exp res loc_res EW
+
+  -- indirection, within same region
+  MkOffset    : {ew_in : _} -> {r : _} -> {loc, loc_in : Loc r} -> Exp x loc_in ew_in -> Exp (Offset x) loc EW
+  {-
+  DeRefOffset : {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
+                Exp (Offset x) loc_in ew_in -> ({loc_val : Loc r_in} -> Exp x loc_val NoEW -> Exp a loc ew) -> Exp a loc ew
+  -}
+  DeRefOffset : {x : _} -> {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
+             Exp (Offset x) loc_in ew_in -> ({r_val : _} -> Exp x (LocStart x r_val) NoEW -> Exp a loc ew) -> Exp a loc ew
+
+  {-
+    TODO:
+      - add assertion to throw error on read before write situations, which can happen with forward pointers and dereference
+      - create and example for this case
+      Q: how does this interact with function calls?
+  -}
+  -- indirection, cross region
+  MkPtr    : {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp x loc_in ew_in -> Exp (Ptr x) loc EW
+  DeRefPtr : {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
+             Exp (Ptr x) loc_in ew_in -> ({r_val : _} -> {loc_val : Loc r_val} -> Exp x loc_val NoEW -> Exp a loc ew) -> Exp a loc ew
+
+  -- primitive values
+  MkT0  : Exp T0 loc EW
+  MkI64 : Int -> Exp I64 loc EW
+
+  -- I64 primops
+  AddI64 : {ew1, ew2 : _} -> {loc_in1, loc_in2 : _} -> Exp I64 loc_in1 ew1 -> Exp I64 loc_in2 ew2 -> Exp I64 loc EW
+  EqI64  : {ew1, ew2 : _} -> {loc_in1, loc_in2 : _} -> Exp I64 loc_in1 ew1 -> Exp I64 loc_in2 ew2 -> Exp (Either T0 T0) loc EW
+
+  AddI64C : Int -> {ew1 : _} -> {loc_in1 : _} -> Exp I64 loc_in1 ew1 -> Exp I64 loc EW
+  EqI64C  : Int -> {ew1 : _} -> {loc_in1 : _} -> Exp I64 loc_in1 ew1 -> Exp (Either T0 T0) loc EW
+  LtI64C  : Int -> {ew1 : _} -> {loc_in1 : _} -> Exp I64 loc_in1 ew1 -> Exp (Either T0 T0) loc EW
+
+  -- IO primops
+  PrintI64 : {ew_in : _} -> {loc_in : _} -> Exp I64 loc_in ew_in -> (() -> Exp t loc ew) -> Exp t loc ew
+
+  -- prints the buffer content at the location in hexadecimal ; requires full traversal effect on the argument, so the end-witness should be available
+  PrintValue : {loc_in : _} -> Exp t_in loc_in EW -> (() -> Exp t loc ew) -> Exp t loc ew
+
 
   -- internal
   Var : Exp t loc ew
@@ -316,6 +335,12 @@ sample_tup2_03_err = let a = MkI64 102 in MkPair a a
 
 sample_tup2_04 : {r : _} -> {loc : Loc r} -> Exp (I64 # I64) loc EW
 sample_tup2_04 = MkPair sample_a sample_a
+
+my_ty3 : Ty
+my_ty3 = Ptr $ Box my_ty3
+
+sample_box_ptr : {r : _} -> {loc : Loc r} -> Exp LoCal.my_ty3 loc EW
+sample_box_ptr = MkPtr {loc_in=loc} $ MkBox sample_box_ptr
 
 -- -------------------------------
 

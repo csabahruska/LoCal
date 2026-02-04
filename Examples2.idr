@@ -11,6 +11,9 @@ import Dynamic
 --              | Nil
 
 mutual
+  my_ty' : Ty
+  my_ty' = Either (Pair I64 $ Box my_ty') T0
+
   my_ty : Ty
   my_ty = Either (Pair I64 my_ty_box) T0
 
@@ -384,15 +387,11 @@ test_12 =
   let genList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp I64 loc_in NoEW -> Exp Examples2.rev_my_ty loc_out EW
       genList i =
         LetRegion $ \r =>
-        LetRegionValue r (MkI64 10) $ \ten =>
-        LetRegion $ \r =>
-        LetRegionValue r (EqI64 ten i) $ \b =>
+        LetRegionValue r (EqI64C 10 i) $ \b =>
         CaseEither b
           (\f =>
               LetRegion $ \r =>
-              LetRegionValue r (MkI64 1) $ \one =>
-              LetRegion $ \r =>
-              LetRegionValue r (AddI64 one i) $ \next =>
+              LetRegionValue r (AddI64C 1 i) $ \next =>
               -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
               -- TODO: what should create the end-witness for COPY?
               -- Q: what should be the rules for end-witness construction?
@@ -423,18 +422,98 @@ test_12 =
               CasePair lst $ \lst, snd_fun =>
               DeRefOffset ofs $ \i =>
               PrintI64 i $ \_ =>
-              FunApp "printList" printList (UnBox lst) id
+              FunApp2 "printList" printList (UnBox lst)
           )
           (\r => MkT0)
+
+      mapSuccList : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} ->
+                    Exp Examples2.rev_my_ty loc_in ew -> Exp Examples2.rev_my_ty loc_out EW
+      mapSuccList a =
+        CaseEither a
+          (\l =>
+              CasePair l $ \ofs, list_fun =>
+              let lst = list_fun $ MkStaticEW ofs in
+              CasePair lst $ \lst, snd_fun =>
+              DeRefOffset ofs $ \i =>
+
+              let res = FunApp2 "mapSuccList" mapSuccList (UnBox lst) in
+              MkLeft $ let i = MkStaticEW $ AddI64C 1 i in MkPair (MkOffset i) $ MkPair (MkBox res) i
+              -- TODO: return input end-witness
+          )
+          --(\r => MkRight $ Copy $ MkStaticEW r)
+          (\r => MkRight MkT0)
+
+      filterLt5List : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} ->
+                    Exp Examples2.rev_my_ty loc_in ew -> Exp Examples2.rev_my_ty loc_out EW
+      filterLt5List a =
+        CaseEither a
+          (\l =>
+              CasePair l $ \ofs, list_fun =>
+              let lst = list_fun $ MkStaticEW ofs in
+              CasePair lst $ \lst, snd_fun =>
+              DeRefOffset ofs $ \i =>
+              LetRegion $ \r =>
+              LetRegionValue r (LtI64C 5 i) $ \b =>
+              CaseEither b
+                (\f => FunApp2 "filterLt5List" filterLt5List (UnBox lst))
+                (\t => let res = FunApp2 "filterLt5List" filterLt5List (UnBox lst) in
+                       MkLeft $ let i = Copy $ MkStaticEW i in MkPair (MkOffset i) $ MkPair (MkBox res) i
+                )
+              -- TODO: return input end-witness
+          )
+          --(\r => MkRight $ Copy $ MkStaticEW r)
+          (\r => MkRight MkT0)
+
+    -- error
+      {-
+      copyList : {ew_in1 : _} -> {r_in1 : _} -> {loc_in1 : Loc r_in1} -> Exp Examples2.rev_my_ty loc_in1 ew_in1 ->
+                 {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.rev_my_ty loc_out EW
+      -}
+    -- ok
+      copyList : {ew_in1 : _} -> {r_in1 : _} -> {loc_in1 : Loc r_in1} -> {r_out : _} -> {loc_out : Loc r_out} ->
+                 Exp Examples2.rev_my_ty loc_in1 ew_in1 -> Exp Examples2.rev_my_ty loc_out EW
+      copyList a =
+        CaseEither a
+          (\l =>
+              CasePair l $ \ofs, list_fun =>
+              let lst = list_fun $ MkStaticEW ofs in
+              CasePair lst $ \lst, snd_fun =>
+              DeRefOffset ofs $ \i =>
+              let res = FunApp2 "copyList" copyList (UnBox lst) in
+              MkLeft $ let i = Copy $ MkStaticEW i in MkPair (MkOffset i) $ MkPair (MkBox res) i
+              -- TODO: return input end-witness
+          )
+          (\r => MkRight MkT0)
+
+
+      -- TODO: support multi parameter functions
+      appendList : {ew_in1 : _} -> {r_in1 : _} -> {loc_in1 : Loc r_in1} ->
+                   {ew_in2 : _} -> {r_in2 : _} -> {loc_in2 : Loc r_in2} ->
+                   {r_out : _} -> {loc_out : Loc r_out} ->
+                   Exp Examples2.rev_my_ty loc_in1 ew_in1 ->
+                   Exp Examples2.rev_my_ty loc_in2 ew_in2 ->
+                   Exp Examples2.rev_my_ty loc_out EW
+      appendList a b =
+        CaseEither a
+          (\l =>
+              CasePair l $ \ofs, list_fun =>
+              let lst = list_fun $ MkStaticEW ofs in
+              CasePair lst $ \lst, snd_fun =>
+              DeRefOffset ofs $ \i =>
+              let res = FunApp2Arg "appendList" appendList (UnBox lst) b in
+              MkLeft $ let i = Copy $ MkStaticEW i in MkPair (MkOffset i) $ MkPair (MkBox res) i
+              -- TODO: return input end-witness
+          )
+          (\r => FunApp2 "copyList" copyList b)
 
   in Main $
       LetRegion $ \r =>
       LetRegionValue r (MkI64 1) $ \i =>
       LetRegion $ \r =>
-      LetRegionValue r (FunApp "genList" genList i id) $ \l =>
+      LetRegionValue r (FunApp2 "genList" genList i) $ \l =>
       PrintValue l $ \_ =>
-      FunApp "printList" printList l $ \l =>
-      l
+      FunApp2 "printList" printList l
+
 
 test_13 : Program
 test_13 = Main $
@@ -564,10 +643,10 @@ main = do
 {-
 TODO:
   list:
-    map (+1) list
-    filter
+    done - map (+1) list
+    done - filter
     sum
-    append
+    done - append
 
   tree
     build

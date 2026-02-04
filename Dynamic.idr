@@ -88,16 +88,20 @@ data LocVal : Type where
 
 -- codegen monad
 
+record CG
+M = StateT CG IO
+
 record CGLocal where
   constructor MkCGLocal
-  locations   : SortedMap String String
-  endwitness  : SortedMap String String
-  pointers    : SortedMap String LocVal
-  funName     : String
-  indentLevel : Nat
+  locations     : SortedMap String String
+  endwitness    : SortedMap String String
+  pointers      : SortedMap String LocVal
+  allocActions  : SortedMap String $ List $ M ()
+  funName       : String
+  indentLevel   : Nat
   -- assertions
-  read        : SortedSet String
-  write       : SortedSet String
+  read          : SortedSet String
+  write         : SortedSet String
 
 record CG where
   constructor MkCG
@@ -109,13 +113,14 @@ record CG where
 
 emptyCGLocal : CGLocal
 emptyCGLocal = MkCGLocal
-  { locations   = empty
-  , endwitness  = empty
-  , pointers    = empty
-  , funName     = ""
-  , indentLevel = 0
-  , read        = empty
-  , write       = empty
+  { locations     = empty
+  , endwitness    = empty
+  , pointers      = empty
+  , allocActions  = empty
+  , funName       = ""
+  , indentLevel   = 0
+  , read          = empty
+  , write         = empty
   }
 
 emptyCG : CG
@@ -126,7 +131,12 @@ emptyCG = MkCG
   , local       = emptyCGLocal
   }
 
-M = StateT CG IO
+-- actions
+addAllocAction : Loc r -> M () -> M ()
+addAllocAction loc act = do
+  modify {local.allocActions $= insertWith (++) (show loc) [act]}
+
+-- assetions
 
 assertRead : Loc r -> M ()
 assertRead loc = do
@@ -262,7 +272,7 @@ genCursor loc = do
       print $ colored BrightGreen " !! has cursor \{v} :=\n \{loc}\n\n"
       pure v
     Nothing => do
-      case loc of
+      res <- case loc of
         LocStart _ (MkRegion ri) => assert_total $ idris_crash $ "INTERNAL ERROR: missing LocStart for region \{ri} locations: \{show locs}"
         LocAfter _ l => do
           c <- newCur
@@ -275,6 +285,15 @@ genCursor loc = do
           c <- newCur
           emit "char* \{c} = \{!(getCursor l)} + \{tagSize};"
           pure c
+
+      -- HINT: run future code actions, or should this run after the first write? t depends, the actions could be tied for allocation or for writes
+      --        this is action running after allocation
+      acts <- gets (.local.allocActions)
+      case lookup locKey acts of
+        Nothing => pure ()
+        Just acts => sequence_ acts
+
+      pure res
 
 hasEndWitness : Loc r -> M Bool
 hasEndWitness loc = do
@@ -328,12 +347,10 @@ partial evalEff : {ew : _} -> {loc : _} -> Exp t loc ew -> M ()
 fillDyn (MkBox v) = do
   putStrLn " ++ MkBox"
   fillDyn v
-  inheritEndWitness loc v
 
 fillDyn (UnBox v) = do
   putStrLn " ++ UnBox"
   fillDyn v
-  inheritEndWitness loc v
 
 fillDyn MkT0 = do
   putStrLn " ++ MkT0"
@@ -398,9 +415,13 @@ fillDyn (MkOffset {loc_in} v) = do
       emit "*(int*) \{cur} = \{cur_in} - \{cur};"
     Nothing => do
       lift $ putStrLn " ++ MkOffset - 3 - Nothing"
-      emit "*(int*) \{cur} = 0; // MkOffset - forward pointer"
-  addPointer (MkLocVal loc_in) loc
+      addAllocAction loc_in $ do
+        cur_in <- getCursor loc_in
+        lift $ putStrLn " ++ MkOffset - forward pointer action"
+        emit "*(int*) \{cur} = \{cur_in} - \{cur};"
+  --addPointer (MkLocVal loc_in) loc
   addStaticSizeEndWitness loc "MkOffset"
+  putStrLn " ++ MkOffset - 4"
 
 fillDyn (DeRefPtr {r_in, loc_in} v cont) = do
   putStrLn " ++ DeRefPtr"
@@ -414,12 +435,13 @@ fillDyn (DeRefPtr {r_in, loc_in} v cont) = do
   emit "/* \{cur} = \{loc_val} */"
   emit "char* \{cur} = *(char**)\{cur_in}; // DeRefPtr"
   fillDyn (cont {r_val, loc_val} Var)
-
+{-
 fillDyn (DeRefOffset {r_in, loc_in} v cont) = do
   putStrLn " ++ DeRefOffset"
   assertRead loc_in
   evalEff v
-  cur_in <- getCursor loc_in
+  Just cur_in <- lookupCursor loc_in
+    | Nothing => pure () -- Just "TODO - getCursor is Nothing"
   MkLocVal {r=r_val} loc_val <- getPointer loc_in
   case decEq r_val r_in of
     No _ => assert_total $ idris_crash $ "INTERNAL ERROR: DeRefOffset region mismatch \{r_val} should be \{r_in}"
@@ -429,6 +451,22 @@ fillDyn (DeRefOffset {r_in, loc_in} v cont) = do
       emit "/* \{cur} = \{loc_val} */"
       emit "char* \{cur} = \{cur_in} + *(int*)\{cur_in}; // DeRefOffset"
       fillDyn (cont {loc_val} Var)
+-}
+fillDyn (DeRefOffset {x, r_in, loc_in} v cont) = do
+  putStrLn " ++ DeRefPtr"
+  assertRead loc_in
+  evalEff v
+  ---
+  let r_val = MkRegion !newId
+      loc_val = LocStart x r_val
+  ---
+  cur_in <- getCursor loc_in
+  -- generate new cursor name for loc_val
+  cur <- newCursorName
+  addCur cur loc_val
+  emit "/* \{cur} = \{loc_val} */"
+  emit "char* \{cur} = \{cur_in} + *(int*)\{cur_in}; // DeRefOffset"
+  fillDyn (cont {r_val} Var)
 
 fillDyn (MkLeft arg) = do
   putStrLn " ++ MkLeft"
@@ -453,6 +491,16 @@ fillDyn (MkRight arg) = do
       what would i lose if only Exp would track types and not locations?
   A: yes, it makes the system simpler
 -}
+
+fillDyn (AddI64C {loc_in1} argC1 arg1) = do
+  putStrLn " ++ AddI64C"
+  assertRead loc_in1
+  assertWrite loc
+  evalEff arg1
+  cur <- genCursor loc
+  cur_in1 <- getCursor loc_in1
+  emit "*(int*) \{cur} = \{argC1} + *(int*) \{cur_in1};"
+  addStaticSizeEndWitness loc "AddI64C - result"
 
 fillDyn (AddI64 {loc_in1, loc_in2} arg1 arg2) = do
   putStrLn " ++ AddI64"
@@ -483,6 +531,20 @@ fillDyn (EqI64 {loc_in1, loc_in2} arg1 arg2) = do
   indent $ emit "*(char*) \{cur} = 0; // LEFT_TAG"
   emit "}"
   addStaticSizeEndWitness loc "EqI64 - result"
+
+fillDyn (EqI64C {loc_in1} argC1 arg1) = do
+  putStrLn " ++ EqI64C"
+  assertRead loc_in1
+  assertWrite loc
+  evalEff arg1
+  cur <- genCursor loc
+  cur_in1 <- getCursor loc_in1
+  emit "if (\{argC1} == *(int*) \{cur_in1}) { // true"
+  indent $ emit "*(char*) \{cur} = 1; // RIGHT_TAG"
+  emit "} else { // false"
+  indent $ emit "*(char*) \{cur} = 0; // LEFT_TAG"
+  emit "}"
+  addStaticSizeEndWitness loc "EqI64C - result"
 
 fillDyn (PrintI64 {loc_in} v cont) = do
   putStrLn " ++ PrintI64"
@@ -523,7 +585,7 @@ fillDyn (CasePair {a, loc_tup} tup cont) = do
   fillDyn $ cont Var AddLocAfter {tup_ew_fun = InheritEW}
 
 --TODO: example for stup2 where an int pair is created and passed to a function that prints the fst and snd ; also create an error case that prints only the snd or snd then fst
-
+{-
 fillDyn (CaseEither {a, b, loc_scrut} v cont_left cont_right) = do
   putStrLn " ++ CaseEither"
   assertRead loc_scrut
@@ -540,6 +602,53 @@ fillDyn (CaseEither {a, b, loc_scrut} v cont_left cont_right) = do
     _ <- genCursor locR
     fillDyn $ cont_right Var {either_ew_fun = InheritEW}
   emit "}"
+-}
+-- TODO: simplify end-witness handling
+fillDyn (CaseEither {a, b, loc_scrut} scrut cont_left cont_right) = do
+  lift $ putStrLn " ++ CaseEither"
+  assertRead loc_scrut
+  evalEff scrut
+  cur_tag <- getCursor loc_scrut
+  let locL = LocAfterTag "Left"  a loc_scrut
+      locR = LocAfterTag "Right" b loc_scrut
+
+  let cur_end_tmp = "\{!(newCursorName)}_end_tmp"
+  emit "char* \{cur_end_tmp} = 0; // uninitalized"
+  cur_tag <- getCursor loc_scrut
+
+  let cur_tag_end_tmp = "\{cur_tag}_end_tmp"
+  emit "char* \{cur_tag_end_tmp} = 0; // uninitalized"
+
+  emit "if (*(char*) \{cur_tag} == 0) { // LEFT"
+  (scrut_ew_left, left_cglocal) <- indent $ localScope $ do
+    _ <- genCursor locL
+    let expL = cont_left Var {either_ew_fun = InheritEW}
+    fillDyn expL
+    emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expL)};"
+    scrut_ew <- lookupEndWitness loc_scrut
+    case scrut_ew of
+      Nothing => pure ()
+      Just ew => emit "\{cur_tag_end_tmp} = \{ew};"
+    pure (isJust scrut_ew, !(gets (.local)))
+  emit "} else { // RIGHT"
+  (scrut_ew_right, right_cglocal) <- indent $ localScope $ do
+    let expR = cont_right Var {either_ew_fun = InheritEW}
+    fillDyn expR
+    emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expR)};"
+    scrut_ew <- lookupEndWitness loc_scrut
+    case scrut_ew of
+      Nothing => pure ()
+      Just ew => emit "\{cur_tag_end_tmp} = \{ew};"
+    pure (isJust scrut_ew, !(gets (.local)))
+  emit "}"
+  modify { local.read   $= union (intersection left_cglocal.read  right_cglocal.read)
+         , local.write  $= union (intersection left_cglocal.write right_cglocal.write)
+         }
+  defineEndWitness loc cur_end_tmp
+  -- add end-witness for loc_scrut ; this can be done when both left and right eliminator has it
+  when (scrut_ew_left && scrut_ew_right) $ do
+    defineEndWitness loc_scrut cur_tag_end_tmp
+
 
 fillDyn (Copy {loc_in} v) = do
   putStrLn " ++ Copy"
@@ -594,6 +703,7 @@ fillDyn (FunApp {loc_arg, loc_res} fun_name fun arg cont) = do
         let (res) = fun Var
         fillDyn res
         emit "return \{!(getEndWitness loc_res)};"
+        --emit "return 0; //TODO: getEndWitness loc_res"
       emit "}"
   putStrLn " ++ FunApp \{fun_name} - 3"
   fillDyn $ cont Var
@@ -634,6 +744,7 @@ fillDyn (FunApp2 {loc_arg, loc_res} fun_name fun arg) = do
         let (res) = fun Var
         fillDyn res
         emit "return \{!(getEndWitness loc_res)};"
+        --emit "return 0; //TODO: getEndWitness loc_res"
       emit "}"
   putStrLn " ++ FunApp2 \{fun_name} - 3"
 
@@ -685,7 +796,7 @@ c_header = """
 partial public export
 toBufferDyn : {t : _} -> Exp t (LocStart t (MkRegion (-1))) EW -> IO String
 toBufferDyn {t} e = do
-  print $ background Yellow " ---- CODEGEN ----"
+  print $ background Yellow " ---- CODEGEN ----\n"
   putStrLn ""
   s <- execStateT emptyCG $ do
     genFunction "main" $ do
@@ -698,8 +809,9 @@ toBufferDyn {t} e = do
 partial public export
 compileProgram : String -> Program -> IO String
 compileProgram name (Main e) = do
-  src <- toBufferDyn e
   let fname = name ++ ".c"
+  print $ background BrightRed " ---- CODEGEN \{fname} ----\n"
+  src <- toBufferDyn e
   Right _ <- writeFile fname src
     | Left err => idris_crash (show err)
   (c_msg, 0) <- run "gcc \{fname} -o \{name}"
