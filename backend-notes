@@ -1,0 +1,50 @@
+think about the codegen semantics, the correspondence of the model and the codegen mechanisms.
+
+forward pointers does not work yet
+  Q: how to support forward pointers?
+
+think about the scoping
+
+the backend should generate readable code
+
+Q: is dependence analyisis needed?
+Q: is suspended codegen needed, which generates writes based on location ordering?
+    IDEA: if so, then locations could be grouped by static sized chunks in which the write could happen in any order
+          ending with a non static sized end-witness.
+    maybe the backend should generate this data structure instead of c code
+    and the actual codegen should happen from this IR where dependence ordering along with alloc/write/read operations are explicit
+
+TODO:
+  read the backend related parts from the papers and thesis
+
+create a new backend that run codegen actions in the location order
+  + LetRegionValue fills a buffer fully
+  + the program is a tree of LetRegionValue-s
+
+compilation strategy:
+  traverse the AST and collect the location -> Exp map
+  reverse codegen by traversing locations backwards from each end-witness
+
+Q: what about offset and ptr abstract location stores?
+    should the dereferenced value be in a new region or should it be the original location value?
+    if so then what will guarantee that the abstract pointer store is written before read?
+
+IDEAS:
+  what about distinguishing regions as read/write regions and read-only regions?
+  maybe this is tracked by the property that a location is written only once and the it is allowed to read multiple times
+
+IDEA:
+  create backend that collect write operations for locations
+
+INSIGHT:
+  if a variable is in scope then the location must be in scope also, because variable id and loc are both unique identifiers
+
+about data dependencies:
+  the type system prevents loops, because two pointers can not point to each other because that would result an indinite type which is not allowed
+  PROBLEM!!! this is not true, the following typechecks:
+    my_ty3 : Ty
+    my_ty3 = Ptr $ Box my_ty3
+
+    sample_box_ptr : {r : _} -> {loc : Loc r} -> Exp LoCal.my_ty3 loc EW
+    sample_box_ptr = MkPtr {loc_in=loc} $ MkBox sample_box_ptr
+
