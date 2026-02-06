@@ -7,11 +7,11 @@ TODO:
   - CANCEL: port examples to CPS
   - CANCEL: add linear arrows
   done - port everything back to direct value based IR, it is ok because (CPS style) MkStaticEW solves the end-witness effect problem
-  - pass/return fun arg end-witnesses
+  wip - pass/return fun arg end-witnesses
 
   done - fix pointer deref types in the model ; deref location starts a new region
     + check what is the deref type in gibbon
-  - support multi parameter functions in the model ; but only when it is easy
+  done - support multi parameter functions in the model ; but only when it is easy
   - check unexecuted alloc actions at the end of codegen or functions
 
 what works:
@@ -29,11 +29,11 @@ limitations:
 
 FUTURE WORK:
   - SKIP: refactor to CPS style EDSL to prevent codegen duplications
-  - end-witness tracking in the type system ; functions return end-witnesses of the traversed input values
+  done - end-witness tracking in the type system ; functions return end-witnesses of the traversed input values
       ideas: a) use linear variables b) index Exp with traverse effect environment
+  done - multi parameter functions
   - index Loc with Ty for more safety
 
   - sub byte addressing
   - pack multiple tags into a byte or machine word
-  - multi parameter functions
   - more primitive types and primops, e.g. arbitrary sized words, byte-buffer

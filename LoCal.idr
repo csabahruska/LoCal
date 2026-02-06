@@ -147,19 +147,19 @@ public export
 data CmpOp = EQ | GE | GT | LE | LT | NE
 
 public export
-data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type
+data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> (saved_ews : List Type) -> Type
 
 public export
 data Arg : (sig : List Type) -> Type where
-  Arg1 : {t : _} -> {r : _} -> {loc : Loc r} -> {ew : _} -> Exp t loc ew -> Arg [Exp t loc ew]
-  ArgN : {t : _} -> {r : _} -> {loc : Loc r} -> {ew : _} -> Exp t loc ew -> Arg s -> Arg (Exp t loc ew :: s)
+  Arg1 : {t : _} -> {r : _} -> {loc : Loc r} -> {ew : _} -> Exp t loc ew [] -> Arg [Exp t loc ew []]
+  ArgN : {t : _} -> {r : _} -> {loc : Loc r} -> {ew : _} -> Exp t loc ew [] -> Arg s -> Arg (Exp t loc ew [] :: s)
 
 data Exp where
-
+  {-
   -- Q: when to introduce new regions? A: for intermediate values
   LetRegion : (Region -> Exp t loc ew) -> Exp t loc ew
   LetRegionValue : {t_val : _} -> (r_val : Region) -> Exp t_val (LocStart t_val r_val) EW -> (Exp t_val (LocStart t_val r_val) EW -> Exp a loc ew) -> Exp a loc ew
-
+  
   MkStaticEW : {ew_in : _} -> {auto _ : Just size = getStaticSize t} -> Exp t loc ew_in -> Exp t loc EW
 
   -- to copy values cross region ; requires full traversal effect on the argument, so the end-witness should be available
@@ -233,13 +233,16 @@ data Exp where
 
   -- fun app ; needs more work to return end-witnesses
   -- IDEA: store end-witnesses as an index in Exp
+  -}
+  AddEW : Exp t1 loc1 ew1 [] -> Exp t2 loc2 ew2 ews2 -> Exp t2 loc2 ew2 (Exp t1 loc1 ew1 [] :: ews2)
 
   FunAppNew : {res : _} -> {r_res : _} -> {loc_res : Loc r_res} ->
            String ->
-           (fun_def : Arg exps_in -> Exp res loc_res EW) ->
+           (fun_def : Arg exps_in -> Exp res loc_res EW fun_ews) ->
            (fun_args : Arg exps_in) ->
-           Exp res loc_res EW
-
+           (Arg fun_ews -> Exp res loc_res EW [] -> Exp c loc ew ews) ->
+           Exp c loc ew ews
+  {-
   FunApp2 : {r_arg, r_res : _} -> {t_arg, res : _} -> {loc_arg : Loc r_arg} -> {loc_res : Loc r_res} -> {ew_arg : _} ->
            String ->
            --(fun_def : Exp t_arg loc_arg ew_arg -> (Exp t_arg loc_arg ew_arg_out, Exp res loc_res EW)) ->
@@ -291,14 +294,16 @@ data Exp where
   -- prints the buffer content at the location in hexadecimal ; requires full traversal effect on the argument, so the end-witness should be available
   PrintValue : {loc_in : _} -> Exp t_in loc_in EW -> (() -> Exp t loc ew) -> Exp t loc ew
 
+  -}
 
   -- internal
-  Var : Exp t loc ew
-
+  Var : Exp t loc ew sew
+  {-
   InheritEW : {r_in : _} -> {loc_in : Loc r_in} -> Exp a loc_in EW -> Exp b loc EW
 
   AddLocAfter : {b : _} -> {locFst : _} -> Exp a locFst EW -> Exp b (LocAfter b locFst) ew
-
+  -}
+{-
 public export
 data Program : Type where
   Main  : {res : Ty} -> Exp res (LocStart res (MkRegion (-1))) EW -> Program
@@ -505,4 +510,5 @@ LtI64C = I64CmpC LT
     - add example for STup2
     - add static or dynamic assertion to MkInd to check that the referred value is written ; this guarantees the correctness of DeRefPtr
       every function argument must be fully written, every return value must be fully written
+-}
 -}
