@@ -141,7 +141,27 @@ data EndWitness = NoEW | EW -- TODO: index it with Loc
 -}
 
 public export
-data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
+data IntOp2 = Plus | Sub | Times | Quot | Rem
+
+public export
+data CmpOp = EQ | GE | GT | LE | LT | NE
+
+public export
+data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type
+
+public export
+data ExpVal = MkExpVal
+
+public export
+data ExpValEW = MkExpValEW
+
+public export
+data ExpValNoEW = MkExpValNoEW
+
+toExpNoEW : ExpVal -> ExpValNoEW
+toExpNoEW _ = MkExpValNoEW
+
+data Exp where
 
   -- Q: when to introduce new regions? A: for intermediate values
   LetRegion : (Region -> Exp t loc ew) -> Exp t loc ew
@@ -218,6 +238,7 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
                -- A: there is no problem because the location would be the same and the end witness will be different
                -- IDEAS: is the result size an Either Int Int?
 
+  -- fun app ; needs more work to return end-witnesses and to support multiple arguments
   FunApp : {r_arg, r_res : _} -> {t_arg, res : _} -> {loc_arg : Loc r_arg} -> {loc_res : Loc r_res} -> {ew_arg : _} ->
            String ->
            --(fun_def : Exp t_arg loc_arg ew_arg -> (Exp t_arg loc_arg ew_arg_out, Exp res loc_res EW)) ->
@@ -226,7 +247,15 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
            --(Exp t_arg loc_arg ew_arg_out -> Exp res loc_res EW -> Exp c loc ew) ->
            (Exp res loc_res EW -> Exp c loc ew) ->
            Exp c loc ew
-
+  {-
+  -- TODO: build a telescope from a data type
+  FunAppNew : {fun_result : List ExpValEW} ->
+           String ->
+           (fun_args : List ExpVal) ->
+           --(fun_def : map LoCal.toExpNoEW fun_args -> fun_result) ->
+           --(fun_result -> Exp c loc ew) ->
+           Exp c loc ew
+  -}
   FunApp2 : {r_arg, r_res : _} -> {t_arg, res : _} -> {loc_arg : Loc r_arg} -> {loc_res : Loc r_res} -> {ew_arg : _} ->
            String ->
            --(fun_def : Exp t_arg loc_arg ew_arg -> (Exp t_arg loc_arg ew_arg_out, Exp res loc_res EW)) ->
@@ -246,12 +275,8 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
 
   -- indirection, within same region
   MkOffset    : {ew_in : _} -> {r : _} -> {loc, loc_in : Loc r} -> Exp x loc_in ew_in -> Exp (Offset x) loc EW
-  {-
-  DeRefOffset : {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
-                Exp (Offset x) loc_in ew_in -> ({loc_val : Loc r_in} -> Exp x loc_val NoEW -> Exp a loc ew) -> Exp a loc ew
-  -}
   DeRefOffset : {x : _} -> {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
-             Exp (Offset x) loc_in ew_in -> ({r_val : _} -> Exp x (LocStart x r_val) NoEW -> Exp a loc ew) -> Exp a loc ew
+                Exp (Offset x) loc_in ew_in -> ({r_val : _} -> Exp x (LocStart x r_val) NoEW -> Exp a loc ew) -> Exp a loc ew
 
   {-
     TODO:
@@ -261,20 +286,20 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
   -}
   -- indirection, cross region
   MkPtr    : {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp x loc_in ew_in -> Exp (Ptr x) loc EW
-  DeRefPtr : {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
-             Exp (Ptr x) loc_in ew_in -> ({r_val : _} -> {loc_val : Loc r_val} -> Exp x loc_val NoEW -> Exp a loc ew) -> Exp a loc ew
+  DeRefPtr : {x : _} -> {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
+             Exp (Ptr x) loc_in ew_in -> ({r_val : _} -> Exp x (LocStart x r_val) NoEW -> Exp a loc ew) -> Exp a loc ew
 
   -- primitive values
   MkT0  : Exp T0 loc EW
   MkI64 : Int -> Exp I64 loc EW
 
   -- I64 primops
-  AddI64 : {ew1, ew2 : _} -> {loc_in1, loc_in2 : _} -> Exp I64 loc_in1 ew1 -> Exp I64 loc_in2 ew2 -> Exp I64 loc EW
-  EqI64  : {ew1, ew2 : _} -> {loc_in1, loc_in2 : _} -> Exp I64 loc_in1 ew1 -> Exp I64 loc_in2 ew2 -> Exp (Either T0 T0) loc EW
+  I64Op2  : IntOp2 -> {ew1, ew2 : _} -> {loc_in1, loc_in2 : _} -> Exp I64 loc_in1 ew1 -> Exp I64 loc_in2 ew2 -> Exp I64 loc EW
+  I64Cmp  : CmpOp  -> {ew1, ew2 : _} -> {loc_in1, loc_in2 : _} -> Exp I64 loc_in1 ew1 -> Exp I64 loc_in2 ew2 -> Exp (Either T0 T0) loc EW
 
-  AddI64C : Int -> {ew1 : _} -> {loc_in1 : _} -> Exp I64 loc_in1 ew1 -> Exp I64 loc EW
-  EqI64C  : Int -> {ew1 : _} -> {loc_in1 : _} -> Exp I64 loc_in1 ew1 -> Exp (Either T0 T0) loc EW
-  LtI64C  : Int -> {ew1 : _} -> {loc_in1 : _} -> Exp I64 loc_in1 ew1 -> Exp (Either T0 T0) loc EW
+  I64Op2CE : IntOp2 -> Int -> {ew2 : _} -> {loc_in2 : _} -> Exp I64 loc_in2 ew2 -> Exp I64 loc EW
+  I64Op2EC : IntOp2 -> {ew1 : _} -> {loc_in1 : _} -> Exp I64 loc_in1 ew1 -> Int -> Exp I64 loc EW
+  I64CmpC  : CmpOp  -> Int -> {ew2 : _} -> {loc_in2 : _} -> Exp I64 loc_in2 ew2 -> Exp (Either T0 T0) loc EW
 
   -- IO primops
   PrintI64 : {ew_in : _} -> {loc_in : _} -> Exp I64 loc_in ew_in -> (() -> Exp t loc ew) -> Exp t loc ew
@@ -289,7 +314,6 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type where
   InheritEW : {r_in : _} -> {loc_in : Loc r_in} -> Exp a loc_in EW -> Exp b loc EW
 
   AddLocAfter : {b : _} -> {locFst : _} -> Exp a locFst EW -> Exp b (LocAfter b locFst) ew
-
 
 public export
 data Program : Type where
@@ -336,11 +360,28 @@ sample_tup2_03_err = let a = MkI64 102 in MkPair a a
 sample_tup2_04 : {r : _} -> {loc : Loc r} -> Exp (I64 # I64) loc EW
 sample_tup2_04 = MkPair sample_a sample_a
 
-my_ty3 : Ty
-my_ty3 = Ptr $ Box my_ty3
+My_ty3 : Ty
+My_ty3 = Ptr $ Box My_ty3
 
-sample_box_ptr : {r : _} -> {loc : Loc r} -> Exp LoCal.my_ty3 loc EW
+sample_box_ptr : {r : _} -> {loc : Loc r} -> Exp My_ty3 loc EW
 sample_box_ptr = MkPtr {loc_in=loc} $ MkBox sample_box_ptr
+
+public export
+AddI64 : {ew1, ew2 : _} -> {loc_in1, loc_in2 : _} -> Exp I64 loc_in1 ew1 -> Exp I64 loc_in2 ew2 -> Exp I64 loc EW
+AddI64 = I64Op2 Plus
+
+public export
+EqI64 : {ew1, ew2 : _} -> {loc_in1, loc_in2 : _} -> Exp I64 loc_in1 ew1 -> Exp I64 loc_in2 ew2 -> Exp (Either T0 T0) loc EW
+EqI64 = I64Cmp EQ
+
+public export
+AddI64C : Int -> {ew1 : _} -> {loc_in1 : _} -> Exp I64 loc_in1 ew1 -> Exp I64 loc EW
+AddI64C = I64Op2CE Plus
+
+public export
+EqI64C, LtI64C : Int -> {ew1 : _} -> {loc_in1 : _} -> Exp I64 loc_in1 ew1 -> Exp (Either T0 T0) loc EW
+EqI64C = I64CmpC EQ
+LtI64C = I64CmpC LT
 
 -- -------------------------------
 

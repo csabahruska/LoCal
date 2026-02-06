@@ -10,54 +10,43 @@ import Dynamic
 -- data IntList = Cons Int IntList
 --              | Nil
 
-mutual
-  my_ty' : Ty
-  my_ty' = Either (Pair I64 $ Box my_ty') T0
+My_ty : Ty
+My_ty = Either (Pair I64 $ Box My_ty) T0
 
-  my_ty : Ty
-  my_ty = Either (Pair I64 my_ty_box) T0
-
-  my_ty_box : Ty
-  my_ty_box = Box my_ty
-
-sample_box_03 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc EW
+sample_box_03 : {r : _} -> {loc : Loc r} -> Exp My_ty loc EW
 sample_box_03 = MkRight MkT0
 
-sample_box_04 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty_box loc EW
+sample_box_04 : {r : _} -> {loc : Loc r} -> Exp (Box My_ty) loc EW
 sample_box_04 = MkBox sample_box_03
 
-sample_box_05 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc EW
+sample_box_05 : {r : _} -> {loc : Loc r} -> Exp My_ty loc EW
 sample_box_05 = UnBox sample_box_04
 
-sample_box_06 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc EW
+sample_box_06 : {r : _} -> {loc : Loc r} -> Exp My_ty loc EW
 sample_box_06 = MkLeft $ MkPair (MkI64 1) sample_box_04
 
-sample_box_07 : {r : _} -> {loc : Loc r} -> Exp Examples2.my_ty loc EW
+sample_box_07 : {r : _} -> {loc : Loc r} -> Exp My_ty loc EW
 sample_box_07 = MkLeft $ MkPair (MkI64 2) $ MkBox sample_box_06
 
 -- data IntList = Cons IntList Int
 --              | Nil
 
-mutual
-  rev_my_ty : Ty
-  rev_my_ty = Either (Pair (Offset I64) $ Pair rev_my_ty_box I64) T0
+Rev_my_ty : Ty
+Rev_my_ty = Either (Pair (Offset I64) $ Pair (Box Rev_my_ty) I64) T0
 
-  rev_my_ty_box : Ty
-  rev_my_ty_box = Box rev_my_ty
-
-sample_box_13 : {r : _} -> {loc : Loc r} -> Exp Examples2.rev_my_ty loc EW
+sample_box_13 : {r : _} -> {loc : Loc r} -> Exp Rev_my_ty loc EW
 sample_box_13 = MkRight MkT0
 
-sample_box_14 : {r : _} -> {loc : Loc r} -> Exp Examples2.rev_my_ty_box loc EW
+sample_box_14 : {r : _} -> {loc : Loc r} -> Exp (Box Rev_my_ty) loc EW
 sample_box_14 = MkBox sample_box_13
 
-sample_box_15 : {r : _} -> {loc : Loc r} -> Exp Examples2.rev_my_ty loc EW
+sample_box_15 : {r : _} -> {loc : Loc r} -> Exp Rev_my_ty loc EW
 sample_box_15 = UnBox sample_box_14
 
-sample_box_16 : {r : _} -> {loc : Loc r} -> Exp Examples2.rev_my_ty loc EW
+sample_box_16 : {r : _} -> {loc : Loc r} -> Exp Rev_my_ty loc EW
 sample_box_16 = MkLeft $ let i = MkI64 1 in MkPair (MkOffset i) $ MkPair (MkBox sample_box_13) i
 
-sample_box_17 : {r : _} -> {loc : Loc r} -> Exp Examples2.rev_my_ty loc EW
+sample_box_17 : {r : _} -> {loc : Loc r} -> Exp Rev_my_ty loc EW
 sample_box_17 = MkLeft $ let i = MkI64 2 in MkPair (MkOffset i) $ MkPair (MkBox sample_box_16) i
 
 -------------------------------------------
@@ -249,7 +238,7 @@ test_6 =
 
 test_7 : Program
 test_7 =
-  let genList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp I64 loc_in -> Exp Examples2.my_ty loc_out
+  let genList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp I64 loc_in -> Exp My_ty loc_out
       genList i =
         LetRegion $ \r =>
         LetRegionValue r (MkI64 10) $ \ten =>
@@ -273,7 +262,7 @@ test_7 =
 
 test_8 : Program
 test_8 =
-  let genList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp I64 loc_in -> Exp Examples2.my_ty loc_out
+  let genList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp I64 loc_in -> Exp My_ty loc_out
       genList i =
         LetRegion $ \r =>
         LetRegionValue r (MkI64 10) $ \ten =>
@@ -296,7 +285,7 @@ test_8 =
           )
           (\t => MkRight MkT0)
 
-      printList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.my_ty loc_in -> Exp T0 loc_out
+      printList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp My_ty loc_in -> Exp T0 loc_out
       printList a =
         CaseEither a
           (\l =>
@@ -318,7 +307,7 @@ test_8 =
 
 test_9 : Program
 test_9 =
-  let printList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.my_ty loc_in -> Exp T0 loc_out
+  let printList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp My_ty loc_in -> Exp T0 loc_out
       printList a =
         CaseEither a
           (\l =>
@@ -337,7 +326,7 @@ test_9 =
 {-
 test_10 : Program
 test_10 =
-  let printList : Nat -> {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.my_ty loc_in ew -> Exp T0 loc_out EW
+  let printList : Nat -> {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp My_ty loc_in ew -> Exp T0 loc_out EW
       printList unroll a =
         CaseEither a
           (\l =>
@@ -360,7 +349,7 @@ test_10 =
 
 test_11 : Program
 test_11 =
-  let printList : Nat -> {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.rev_my_ty loc_in ew -> Exp T0 loc_out EW
+  let printList : Nat -> {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Rev_my_ty loc_in ew -> Exp T0 loc_out EW
       printList unroll a =
         CaseEither a
           (\l =>
@@ -384,7 +373,7 @@ test_11 =
 
 test_12 : Program
 test_12 =
-  let genList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp I64 loc_in NoEW -> Exp Examples2.rev_my_ty loc_out EW
+  let genList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp I64 loc_in NoEW -> Exp Rev_my_ty loc_out EW
       genList i =
         LetRegion $ \r =>
         LetRegionValue r (EqI64C 10 i) $ \b =>
@@ -413,7 +402,7 @@ test_12 =
           )
           (\t => MkRight MkT0)
 
-      printList : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.rev_my_ty loc_in ew -> Exp T0 loc_out EW
+      printList : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Exp Rev_my_ty loc_in ew -> Exp T0 loc_out EW
       printList a =
         CaseEither a
           (\l =>
@@ -427,7 +416,7 @@ test_12 =
           (\r => MkT0)
 
       mapSuccList : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} ->
-                    Exp Examples2.rev_my_ty loc_in ew -> Exp Examples2.rev_my_ty loc_out EW
+                    Exp Rev_my_ty loc_in ew -> Exp Rev_my_ty loc_out EW
       mapSuccList a =
         CaseEither a
           (\l =>
@@ -444,7 +433,7 @@ test_12 =
           (\r => MkRight MkT0)
 
       filterLt5List : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} ->
-                    Exp Examples2.rev_my_ty loc_in ew -> Exp Examples2.rev_my_ty loc_out EW
+                    Exp Rev_my_ty loc_in ew -> Exp Rev_my_ty loc_out EW
       filterLt5List a =
         CaseEither a
           (\l =>
@@ -466,12 +455,12 @@ test_12 =
 
     -- error
       {-
-      copyList : {ew_in1 : _} -> {r_in1 : _} -> {loc_in1 : Loc r_in1} -> Exp Examples2.rev_my_ty loc_in1 ew_in1 ->
-                 {r_out : _} -> {loc_out : Loc r_out} -> Exp Examples2.rev_my_ty loc_out EW
+      copyList : {ew_in1 : _} -> {r_in1 : _} -> {loc_in1 : Loc r_in1} -> Exp Rev_my_ty loc_in1 ew_in1 ->
+                 {r_out : _} -> {loc_out : Loc r_out} -> Exp Rev_my_ty loc_out EW
       -}
     -- ok
       copyList : {ew_in1 : _} -> {r_in1 : _} -> {loc_in1 : Loc r_in1} -> {r_out : _} -> {loc_out : Loc r_out} ->
-                 Exp Examples2.rev_my_ty loc_in1 ew_in1 -> Exp Examples2.rev_my_ty loc_out EW
+                 Exp Rev_my_ty loc_in1 ew_in1 -> Exp Rev_my_ty loc_out EW
       copyList a =
         CaseEither a
           (\l =>
@@ -490,9 +479,9 @@ test_12 =
       appendList : {ew_in1 : _} -> {r_in1 : _} -> {loc_in1 : Loc r_in1} ->
                    {ew_in2 : _} -> {r_in2 : _} -> {loc_in2 : Loc r_in2} ->
                    {r_out : _} -> {loc_out : Loc r_out} ->
-                   Exp Examples2.rev_my_ty loc_in1 ew_in1 ->
-                   Exp Examples2.rev_my_ty loc_in2 ew_in2 ->
-                   Exp Examples2.rev_my_ty loc_out EW
+                   Exp Rev_my_ty loc_in1 ew_in1 ->
+                   Exp Rev_my_ty loc_in2 ew_in2 ->
+                   Exp Rev_my_ty loc_out EW
       appendList a b =
         CaseEither a
           (\l =>

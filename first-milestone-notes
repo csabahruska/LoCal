@@ -6,8 +6,13 @@ TODO/FUTURE WORK: extend the type system to track these too
 TODO:
   - CANCEL: port examples to CPS
   - CANCEL: add linear arrows
-  - port everything back to direct value based IR, it is ok because (CPS style) MkStaticEW solves the end-witness effect problem
+  done - port everything back to direct value based IR, it is ok because (CPS style) MkStaticEW solves the end-witness effect problem
   - pass/return fun arg end-witnesses
+
+  done - fix pointer deref types in the model ; deref location starts a new region
+    + check what is the deref type in gibbon
+  - support multi parameter functions in the model ; but only when it is easy
+  - check unexecuted alloc actions at the end of codegen or functions
 
 what works:
   - location calculus EDSL model where the location are inferred by the idris type elaborator
