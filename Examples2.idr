@@ -475,21 +475,19 @@ test_12 =
           (\r => MkRight MkT0)
 
 
-      -- TODO: support multi parameter functions
       appendList : {ew_in1 : _} -> {r_in1 : _} -> {loc_in1 : Loc r_in1} ->
                    {ew_in2 : _} -> {r_in2 : _} -> {loc_in2 : Loc r_in2} ->
                    {r_out : _} -> {loc_out : Loc r_out} ->
-                   Exp Rev_my_ty loc_in1 ew_in1 ->
-                   Exp Rev_my_ty loc_in2 ew_in2 ->
+                   Arg [Exp Rev_my_ty loc_in1 ew_in1, Exp Rev_my_ty loc_in2 ew_in2] ->
                    Exp Rev_my_ty loc_out EW
-      appendList a b =
+      appendList (ArgN a (Arg1 b)) =
         CaseEither a
           (\l =>
               CasePair l $ \ofs, list_fun =>
               let lst = list_fun $ MkStaticEW ofs in
               CasePair lst $ \lst, snd_fun =>
               DeRefOffset ofs $ \i =>
-              let res = FunApp2Arg "appendList" appendList (UnBox lst) b in
+              let res = FunAppNew "appendList" appendList $ ArgN (UnBox lst) $ Arg1 b in
               MkLeft $ let i = Copy $ MkStaticEW i in MkPair (MkOffset i) $ MkPair (MkBox res) i
               -- TODO: return input end-witness
           )
@@ -536,8 +534,7 @@ test_15 =
   in Main $
       LetRegion $ \r =>
       LetRegionValue r (MkPair (MkI64 7) (MkI64 8)) $ \t1 =>
-      FunApp "printPair" printPair t1 $ \res =>
-      res
+      FunApp2 "printPair" printPair t1
 
 test_16 : Program
 test_16 =
@@ -551,8 +548,7 @@ test_16 =
   in Main $
       LetRegion $ \r =>
       LetRegionValue r (MkPair (MkI64 7) (MkI64 8)) $ \t1 =>
-      FunApp "printPair" printPair t1 $ \res =>
-      res
+      FunApp2 "printPair" printPair t1
 
 test_17 : Program
 test_17 =
@@ -566,8 +562,22 @@ test_17 =
   in Main $
       LetRegion $ \r =>
       LetRegionValue r (MkPair (MkI64 7) (MkI64 8)) $ \t1 =>
-      FunApp "printPair" printPair t1 $ \res =>
-      res
+      FunApp2 "printPair" printPair t1
+
+test_20 : Program
+test_20 =
+  let printPair2 : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} ->
+                   Arg [Exp (Pair I64 I64) loc_in ew_in] -> Exp T0 loc_out EW
+      printPair2 (Arg1 p) =
+        CasePair p $ \fst, snd_fun =>
+        let snd = snd_fun (MkStaticEW fst) in
+        PrintI64 snd $ \_ =>
+        PrintI64 fst $ \_ =>
+        MkT0
+  in Main $
+      LetRegion $ \r =>
+      LetRegionValue r (MkPair (MkI64 7) (MkI64 8)) $ \t1 =>
+      FunAppNew "printPair2" printPair2 $ Arg1 t1
 
 -- test
 

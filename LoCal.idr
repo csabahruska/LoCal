@@ -150,16 +150,9 @@ public export
 data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> Type
 
 public export
-data ExpVal = MkExpVal
-
-public export
-data ExpValEW = MkExpValEW
-
-public export
-data ExpValNoEW = MkExpValNoEW
-
-toExpNoEW : ExpVal -> ExpValNoEW
-toExpNoEW _ = MkExpValNoEW
+data Arg : (sig : List Type) -> Type where
+  Arg1 : {t : _} -> {r : _} -> {loc : Loc r} -> {ew : _} -> Exp t loc ew -> Arg [Exp t loc ew]
+  ArgN : {t : _} -> {r : _} -> {loc : Loc r} -> {ew : _} -> Exp t loc ew -> Arg s -> Arg (Exp t loc ew :: s)
 
 data Exp where
 
@@ -238,24 +231,15 @@ data Exp where
                -- A: there is no problem because the location would be the same and the end witness will be different
                -- IDEAS: is the result size an Either Int Int?
 
-  -- fun app ; needs more work to return end-witnesses and to support multiple arguments
-  FunApp : {r_arg, r_res : _} -> {t_arg, res : _} -> {loc_arg : Loc r_arg} -> {loc_res : Loc r_res} -> {ew_arg : _} ->
+  -- fun app ; needs more work to return end-witnesses
+  -- IDEA: store end-witnesses as an index in Exp
+
+  FunAppNew : {res : _} -> {r_res : _} -> {loc_res : Loc r_res} ->
            String ->
-           --(fun_def : Exp t_arg loc_arg ew_arg -> (Exp t_arg loc_arg ew_arg_out, Exp res loc_res EW)) ->
-           (fun_def : Exp t_arg loc_arg NoEW -> Exp res loc_res EW) ->
-           Exp t_arg loc_arg ew_arg ->
-           --(Exp t_arg loc_arg ew_arg_out -> Exp res loc_res EW -> Exp c loc ew) ->
-           (Exp res loc_res EW -> Exp c loc ew) ->
-           Exp c loc ew
-  {-
-  -- TODO: build a telescope from a data type
-  FunAppNew : {fun_result : List ExpValEW} ->
-           String ->
-           (fun_args : List ExpVal) ->
-           --(fun_def : map LoCal.toExpNoEW fun_args -> fun_result) ->
-           --(fun_result -> Exp c loc ew) ->
-           Exp c loc ew
-  -}
+           (fun_def : Arg exps_in -> Exp res loc_res EW) ->
+           (fun_args : Arg exps_in) ->
+           Exp res loc_res EW
+
   FunApp2 : {r_arg, r_res : _} -> {t_arg, res : _} -> {loc_arg : Loc r_arg} -> {loc_res : Loc r_res} -> {ew_arg : _} ->
            String ->
            --(fun_def : Exp t_arg loc_arg ew_arg -> (Exp t_arg loc_arg ew_arg_out, Exp res loc_res EW)) ->
@@ -424,22 +408,6 @@ LtI64C = I64CmpC LT
 
 -- -------------------------------
 
--- multi arg modeling
-{-
-data Arg : (sig : List Ty) -> Type where
-  NilArg : Arg Nil
-  MkArg : Exp t -> Arg s -> Arg (t :: s)
-
-test2 : Arg [I64, I64]
-test2 = MkArg (MkI64 1) $ MkArg (MkI64 2) $ NilArg
-
-FunTy : List Ty -> Ty -> Type
-FunTy [] r = Exp r
-FunTy (t::ts) r = Exp t -> FunTy ts r
-
-fn : FunTy [I64, I64] I64
-fn = \a => \b => b
--}
 {-
   ingredients
     App - function + one argument
