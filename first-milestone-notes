@@ -13,6 +13,13 @@ TODO:
     + check what is the deref type in gibbon
   done - support multi parameter functions in the model ; but only when it is easy
   - check unexecuted alloc actions at the end of codegen or functions
+  - all cursor gen/get functions must be cps style which can postpone actions
+    this will implicitly implement the new backend design where the cursors are generated in the location order
+  - bring back cps style, or check that a location is generated for write only once
+    Q: if we would keep the direct style then would the cursor generation work in direct mode?
+    A: i think so
+    IDEA: write is direct style with direct codegen, reads could be suspended
+  - handle funapp multi end-witness returning
 
 what works:
   - location calculus EDSL model where the location are inferred by the idris type elaborator

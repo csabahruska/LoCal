@@ -305,6 +305,10 @@ getWrittenCursor : Loc r -> (String -> M ()) -> M ()
 getWrittenCursor loc action = ?getWrittenCursor1 -- case !(lookupCursor loc) of
 
 -- TODO: check that it is written only once ; use an effect map for LocVals
+-- TODO: make this continuation based, which can pospone action until the location could be generated, i.e. end-witness is added
+-- DESIGN: allocations must not block, but writes can be postponed, but not allocations
+--          this mean that fillDyn always progress, and it creates cursors, bit not necessary writes the content
+--         in case of reads the cursos allocation must progress also, because the EDSL API guarantees ???? IDK, what does it guarantees?
 allocCursor : (loc : Loc r) -> M String
 allocCursor loc = do
   -- putStrLn " !! gen cursor for \{loc}"
@@ -414,7 +418,9 @@ fillDyn (MkPair va vb) = do
   putStrLn " ++ MkPair"
   _ <- allocCursor loc
   fillDyn va
+  -- TODO: wait for written va
   fillDyn vb
+  -- TODO: wait for written vb
   inheritEndWitness loc vb
   markWrite loc $ pure ()
 
@@ -472,6 +478,7 @@ fillDyn (MkLeft arg) = do
   cur <- allocCursor loc
   emit "*(char*) \{cur} = 0; // LEFT_TAG"
   fillDyn arg
+  -- TODO: wait for written arg
   inheritEndWitness loc arg
   markWrite loc $ pure ()
 
@@ -480,6 +487,7 @@ fillDyn (MkRight arg) = do
   cur <- allocCursor loc
   emit "*(char*) \{cur} = 1; // RIGHT_TAG"
   fillDyn arg
+  -- TODO: wait for written arg
   inheritEndWitness loc arg
   markWrite loc $ pure ()
 
