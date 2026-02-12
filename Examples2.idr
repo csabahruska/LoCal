@@ -50,7 +50,7 @@ sample_tup2_04 : {r : _} -> {loc : Loc r} -> Exp (I64 # I64) loc EW []
 sample_tup2_04 = MkPair sample_a sample_a
 
 My_ty3 : Ty
-My_ty3 = Ptr $ Box My_ty3
+My_ty3 = Ptr $ Box "My_ty3" My_ty3
 
 sample_box_ptr : {r : _} -> {loc : Loc r} -> Exp My_ty3 loc EW []
 sample_box_ptr = MkPtr {loc_in=loc} $ MkBox sample_box_ptr
@@ -80,12 +80,12 @@ LtI64C = I64CmpC LT
 --              | Nil
 
 My_ty : Ty
-My_ty = Either (Pair I64 $ Box My_ty) T0
+My_ty = Either (Pair I64 $ Box "My_ty" My_ty) T0
 
 sample_box_03 : {r : _} -> {loc : Loc r} -> Exp My_ty loc EW []
 sample_box_03 = MkRight MkT0
 
-sample_box_04 : {r : _} -> {loc : Loc r} -> Exp (Box My_ty) loc EW []
+sample_box_04 : {r : _} -> {loc : Loc r} -> Exp (Box "My_ty" My_ty) loc EW []
 sample_box_04 = MkBox sample_box_03
 
 sample_box_05 : {r : _} -> {loc : Loc r} -> Exp My_ty loc EW []
@@ -101,12 +101,12 @@ sample_box_07 = MkLeft $ MkPair (MkI64 2) $ MkBox sample_box_06
 --              | Nil
 
 Rev_my_ty : Ty
-Rev_my_ty = Either (Pair (Offset I64) $ Pair (Box Rev_my_ty) I64) T0
+Rev_my_ty = Either (Pair (Offset I64) $ Pair (Box "Rev_my_ty" Rev_my_ty) I64) T0
 
 sample_box_13 : {r : _} -> {loc : Loc r} -> Exp Rev_my_ty loc EW []
 sample_box_13 = MkRight MkT0
 
-sample_box_14 : {r : _} -> {loc : Loc r} -> Exp (Box Rev_my_ty) loc EW []
+sample_box_14 : {r : _} -> {loc : Loc r} -> Exp (Box "Rev_my_ty" Rev_my_ty) loc EW []
 sample_box_14 = MkBox sample_box_13
 
 sample_box_15 : {r : _} -> {loc : Loc r} -> Exp Rev_my_ty loc EW []

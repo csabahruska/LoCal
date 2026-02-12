@@ -1,5 +1,8 @@
 module LoCal
 
+import Control.Function
+import Decidable.Equality
+
 public export
 data Ty : Type where
   T0      : Ty
@@ -10,7 +13,22 @@ data Ty : Type where
   Offset  : Ty -> Ty -- signed pointer offset value
   Ptr     : Ty -> Ty -- raw pointer ; no tag ; just the location data
   -- recursive type support
-  Box     : Lazy Ty -> Ty
+  Box     : String -> Lazy Ty -> Ty
+
+public export
+showTy : Ty -> String
+showTy t = case t of
+  T0          => "T0"
+  Pair a b    => "Pair (\{showTy a}) (\{showTy b})"
+  Either a b  => "Either (\{showTy a}) (\{showTy b})"
+  I64         => "I64"
+  Offset a    => "Offset (\{showTy a})"
+  Ptr a       => "Ptr (\{showTy a})"
+  Box n t     => "Box \{n}"
+
+public export Show Ty  where show = showTy
+public export Eq Ty    where a == b = showTy a == showTy b
+public export DecEq Ty where decEq = decEq @{FromEq}
 
 public export
 getStaticSize : Ty -> Maybe Int
@@ -29,7 +47,7 @@ getStaticSize = \case
     if sa == sb -- special case, when the left and right size matches and statically known
       then Just (1 + sa)
       else Nothing
-  Box _ => Nothing
+  Box _ _ => Nothing
 
 {-
   INSIGHT:
@@ -55,6 +73,15 @@ getStaticSize = \case
 public export
 data Region : Type where
   MkRegion : Int -> Region
+
+export
+Injective MkRegion where
+  injective Refl = Refl
+
+public export
+DecEq Region where
+  decEq (MkRegion x) (MkRegion y) = decEqCong $ decEq x y
+
 
 public export
 data Loc : (r : Region) -> Type where
@@ -124,8 +151,8 @@ data Exp where
   Copy : {loc_in : _} -> Exp t loc_in EW [] -> Exp t loc EW []
 
   -- boxing
-  MkBox : Exp t loc ew [] -> Exp (Box t) loc ew []
-  UnBox : Exp (Box t) loc ew [] -> Exp t loc ew []
+  MkBox : {n : String} -> Exp t loc ew [] -> Exp (Box n t) loc ew []
+  UnBox : Exp (Box _ t) loc ew [] -> Exp t loc ew []
 
   -- value shapes, ADT can be modeled with these
 

@@ -1,5 +1,7 @@
 module HiCal
 
+import Decidable.Equality
+
 public export
 data Ty : Type where
   T0      : Ty
@@ -7,7 +9,20 @@ data Ty : Type where
   Either  : Ty -> Ty -> Ty
   I64     : Ty
   -- recursive type support
-  Box     : Lazy Ty -> Ty
+  Box     : String -> Lazy Ty -> Ty
+
+public export
+showTy : Ty -> String
+showTy t = case t of
+  T0          => "T0"
+  Pair a b    => "Pair (\{showTy a}) (\{showTy b})"
+  Either a b  => "Either (\{showTy a}) (\{showTy b})"
+  I64         => "I64"
+  Box n t     => "Box \{n}"
+
+public export Show Ty  where show = showTy
+public export Eq Ty    where a == b = showTy a == showTy b
+public export DecEq Ty where decEq = decEq @{FromEq}
 
 public export
 data IntOp2 = Plus | Sub | Times | Quot | Rem
@@ -25,11 +40,11 @@ data Arg : (sig : List Type) -> Type where
 
 data Exp where
 
-  Let : {a, b : Ty} -> Exp a -> (Exp a -> Exp b) -> Exp b
+  Let : {a: Ty} -> Exp a -> (Exp a -> Exp b) -> Exp b
 
   -- boxing
-  MkBox : Exp t -> Exp (Box t)
-  UnBox : Exp (Box t) -> Exp t
+  MkBox : {n : String} -> Exp t -> Exp (Box n t)
+  UnBox : Exp (Box _ t) -> Exp t
 
   -- value shapes, ADT can be modeled with these
 
@@ -53,18 +68,14 @@ data Exp where
   I64Op2  : IntOp2 -> Exp I64 -> Exp I64 -> Exp I64
   I64Cmp  : CmpOp  -> Exp I64 -> Exp I64 -> Exp (Either T0 T0)
 
-  I64Op2CE : IntOp2 -> Int -> Exp I64 -> Exp I64
-  I64Op2EC : IntOp2 -> Exp I64 -> Int -> Exp I64
-  I64CmpC  : CmpOp  -> Int -> Exp I64 -> Exp (Either T0 T0)
-
   -- IO primops
   PrintI64 : Exp I64 -> (() -> Exp t) -> Exp t
 
   -- prints the buffer content at the location in hexadecimal
-  PrintValue : Exp t_in -> (() -> Exp t) -> Exp t
+  PrintValue : {t_in : _} -> Exp t_in -> (() -> Exp t) -> Exp t
 
   -- internal
-  Var : Exp t
+  Var : {t : _} -> Int -> Exp t
 
 public export
 data Program : Type where

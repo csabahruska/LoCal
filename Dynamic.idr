@@ -12,31 +12,12 @@ import System.File
 import System
 import Decidable.Equality
 
-export
-Injective MkRegion where
-  injective Refl = Refl
-
-public export
-DecEq Region where
-  decEq (MkRegion x) (MkRegion y) = decEqCong $ decEq x y
-
 showRegion : Region -> String
 showRegion (MkRegion i) = "MkRegion \{i}"
 
 Show Region where show = showRegion
 Interpolation Region where interpolate = show
 
-showTy : Ty -> String
-showTy t = case t of
-  T0          => "T0"
-  Pair a b    => "Pair (\{showTy a}) (\{showTy b})"
-  Either a b  => "Either (\{showTy a}) (\{showTy b})"
-  I64         => "I64"
-  Offset a    => "Offset (\{showTy a})"
-  Ptr a       => "Ptr (\{showTy a})"
-  Box i       => "Box"
-
-Show Ty where show = showTy
 Interpolation Ty where interpolate = showTy
 
 showLoc : Loc r -> String
