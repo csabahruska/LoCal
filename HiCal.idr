@@ -3,13 +3,7 @@ module HiCal
 import Decidable.Equality
 
 public export
-data Ty : Type where
-  T0      : Ty
-  Pair    : Ty -> Ty -> Ty
-  Either  : Ty -> Ty -> Ty
-  I64     : Ty
-  -- recursive type support
-  Box     : String -> Lazy Ty -> Ty
+data Ty = I64 | T0 | Pair Ty Ty | Either Ty Ty | Box String (Lazy Ty)
 
 public export
 showTy : Ty -> String

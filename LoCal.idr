@@ -141,11 +141,9 @@ data Arg : (sig : List Type) -> Type where
 data Exp where
 
   -- Q: when to introduce new regions? A: for intermediate values
-  LetRegion : (Region -> Exp t loc ew ews) -> Exp t loc ew ews
+  LetRegion : (Region -> Exp t loc ew ews) -> Exp t loc ew ews -- TODO: remove this op, or add an iterpretation layer that evaluates it
   LetRegionValue : {t_val : _} -> (r_val : Region) -> Exp t_val (LocStart t_val r_val) EW [] ->
                    (Exp t_val (LocStart t_val r_val) EW [] -> Exp a loc ew ews) -> Exp a loc ew ews
-
-  MkStaticEW : {ew_in : _} -> {auto _ : Just size = getStaticSize t} -> Exp t loc ew_in [] -> Exp t loc EW []
 
   -- to copy values cross region ; requires full traversal effect on the argument, so the end-witness should be available
   Copy : {loc_in : _} -> Exp t loc_in EW [] -> Exp t loc EW []
@@ -171,6 +169,7 @@ data Exp where
     Exp b locArg EW [] -> Exp (Either a b) loc EW []
 
   -- serial access pair
+  {-
   CasePair : {r_tup : _} -> {a, b, c : Ty} -> {loc_tup : Loc r_tup} -> {ew_tup, ew : _} -> {loc : _} -> {ews : _} ->
               Exp (Pair a b) loc_tup ew_tup [] ->
               let locFst = LocAfterTag "Pair" a loc_tup in
@@ -182,13 +181,33 @@ data Exp where
                 {tup_ew_fun : Exp b locSnd EW [] -> Exp (Pair a b) loc_tup EW []} ->
                 Exp c loc ew ews
               ) -> Exp c loc ew ews
+  -}
+  -- instead of CasePair
+  GetFst : {r_tup : _} -> {a, b : Ty} -> {loc_tup : Loc r_tup} -> {ew_tup : _} ->
+              Exp (Pair a b) loc_tup ew_tup [] ->
+              let locFst = LocAfterTag "Pair" a loc_tup in
+              Exp a locFst NoEW []
 
+  GetSnd : {r_tup : _} -> {a, b : Ty} -> {loc_tup : Loc r_tup} -> {ew_tup: _} ->
+           Exp (Pair a b) loc_tup ew_tup [] ->
+           let locFst = LocAfterTag "Pair" a loc_tup in
+           let locSnd = LocAfter b locFst in
+           Exp a locFst EW [] -> Exp b locSnd ew_tup []
+  {-
   CaseEither : {r_scrut : _} -> {a, b, c : Ty} -> {loc_scrut : Loc r_scrut} -> {ew_scrut, ew : _} -> {loc : _} -> {ews : _} ->
                Exp (Either a b) loc_scrut ew_scrut [] ->
                let locL = LocAfterTag "Left"  a loc_scrut in
                let locR = LocAfterTag "Right" b loc_scrut in
                (Exp a locL ew_scrut [] -> {either_ew_fun : Exp a locL EW [] -> Exp (Either a b) loc_scrut EW []} -> Exp c loc ew ews) ->
                (Exp b locR ew_scrut [] -> {either_ew_fun : Exp b locR EW [] -> Exp (Either a b) loc_scrut EW []} -> Exp c loc ew ews) ->
+               Exp c loc ew ews
+  -}
+  NewCaseEither : {r_scrut : _} -> {a, b, c : Ty} -> {loc_scrut : Loc r_scrut} -> {ew_scrut, ew : _} -> {loc : _} -> {ews : _} ->
+               Exp (Either a b) loc_scrut ew_scrut [] ->
+               let locL = LocAfterTag "Left"  a loc_scrut in
+               let locR = LocAfterTag "Right" b loc_scrut in
+               (Exp a locL ew_scrut [] -> Exp c loc ew ews) ->
+               (Exp b locR ew_scrut [] -> Exp c loc ew ews) ->
                Exp c loc ew ews
 
   -- IDEA: store end-witnesses as an index in Exp
@@ -237,8 +256,36 @@ data Exp where
 
   -- internal
   Var : Exp t loc ew sew
-  InheritEW : {r_in : _} -> {loc_in : Loc r_in} -> Exp a loc_in EW [] -> Exp b loc EW []
-  AddLocAfter : {b : _} -> {locFst : _} -> Exp a locFst EW [] -> Exp b (LocAfter b locFst) ew []
+  --InheritEW : {r_in : _} -> {loc_in : Loc r_in} -> Exp a loc_in EW [] -> Exp b loc EW [] -- new version: PairEW, LeftEW, RightEW
+  --AddLocAfter : {b : _} -> {locFst : _} -> Exp a locFst EW [] -> Exp b (LocAfter b locFst) ew [] -- new version: GetSnd
+
+  -- new formulation
+  --GetSnd : {b : _} -> {locFst : _} -> Exp a locFst EW [] -> Exp b (LocAfter b locFst) ew []
+
+  -- instead of AddLocAfter
+
+  -- end-witnesses
+
+  -- TODO: rename to StaticEW
+  StaticEW : {ew_in : _} -> {auto _ : Just size = getStaticSize t} -> Exp t loc ew_in [] -> Exp t loc EW []
+
+
+  -- instead of InheritEW
+  PairEW : {r_tup : _} -> {a, b : Ty} -> {loc_tup : Loc r_tup} -> {ew_tup : _} ->
+           Exp (Pair a b) loc_tup ew_tup [] ->
+           let locFst = LocAfterTag "Pair" a loc_tup in
+           let locSnd = LocAfter b locFst in
+           Exp b locSnd EW [] -> Exp (Pair a b) loc_tup EW []
+
+  LeftEW : {r_scrut : _} -> {a, b : Ty} -> {loc_scrut : Loc r_scrut} ->
+           Exp (Either a b) loc_scrut ew_scrut [] ->
+           let locL = LocAfterTag "Left" a loc_scrut in
+           Exp a locL EW [] -> Exp (Either a b) loc_scrut EW []
+
+  RightEW : {r_scrut : _} -> {a, b : Ty} -> {loc_scrut : Loc r_scrut} ->
+            Exp (Either a b) loc_scrut ew_scrut [] ->
+            let locR = LocAfterTag "Right" b loc_scrut in
+            Exp b locR EW [] -> Exp (Either a b) loc_scrut EW []
 
 public export
 data Program : Type where
