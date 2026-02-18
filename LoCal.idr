@@ -264,10 +264,16 @@ data Exp where
 
   -- instead of AddLocAfter
 
+  -- temp stuff
+  LetTick : Int -> Exp t loc ew sew -> Exp t loc ew sew
+
+
   -- end-witnesses
 
   -- TODO: rename to StaticEW
   StaticEW : {ew_in : _} -> {auto _ : Just size = getStaticSize t} -> Exp t loc ew_in [] -> Exp t loc EW []
+
+  GenEW : Exp t loc ew_in [] -> Exp t loc EW []
 
 
   -- instead of InheritEW
