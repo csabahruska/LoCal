@@ -2,6 +2,7 @@ module LoCal
 
 import Control.Function
 import Decidable.Equality
+import Data.Primitives.Interpolation
 
 public export
 data Ty : Type where
@@ -82,12 +83,26 @@ public export
 DecEq Region where
   decEq (MkRegion x) (MkRegion y) = decEqCong $ decEq x y
 
+showRegion : Region -> String
+showRegion (MkRegion i) = "MkRegion \{i}"
+
+public export Show Region where show = showRegion
 
 public export
 data Loc : (r : Region) -> Type where
   LocStart    : (t : Ty) -> (r : Region) -> Loc r
   LocAfter    : (t : Ty) -> Loc r -> Loc r
   LocAfterTag : String -> (t : Ty) -> Loc r -> Loc r -- statically known ; used for jump over the tag
+
+showLoc : Loc r -> String
+showLoc loc = case loc of
+  LocStart t r => "LocStart (\{show t}) (\{show r})"
+  LocAfter t l => "LocAfter (\{show t})\n (\{showLoc l})"
+  LocAfterTag s t l => "LocAfterTag \{s} (\{show t})\n (\{showLoc l})"
+
+public export Show (Loc r) where show = showLoc
+public export Eq (Loc r)    where a == b = showLoc a == showLoc b
+public export DecEq (Loc r) where decEq = decEq @{FromEq}
 
 {-
   mvp simplifications:
@@ -146,11 +161,11 @@ data Exp where
                    (Exp t_val (LocStart t_val r_val) EW [] -> Exp a loc ew ews) -> Exp a loc ew ews
 
   -- to copy values cross region ; requires full traversal effect on the argument, so the end-witness should be available
-  Copy : {loc_in : _} -> Exp t loc_in EW [] -> Exp t loc EW []
+  Copy : {r_in : _} -> {loc_in : Loc r_in} -> Exp t loc_in EW [] -> Exp t loc EW []
 
   -- boxing
-  MkBox : {n : String} -> Exp t loc ew [] -> Exp (Box n t) loc ew []
-  UnBox : Exp (Box _ t) loc ew [] -> Exp t loc ew []
+  MkBox : {t : _} -> {n : String} -> Exp t loc ew [] -> Exp (Box n t) loc ew []
+  UnBox : {t : _} -> {n : String} -> Exp (Box n t) loc ew [] -> Exp t loc ew []
 
   -- value shapes, ADT can be modeled with these
 
@@ -241,18 +256,18 @@ data Exp where
   MkI64 : Int -> Exp I64 loc EW []
 
   -- I64 primops
-  I64Op2  : IntOp2 -> {ew1, ew2 : _} -> {loc_in1, loc_in2 : _} -> Exp I64 loc_in1 ew1 [] -> Exp I64 loc_in2 ew2 [] -> Exp I64 loc EW []
-  I64Cmp  : CmpOp  -> {ew1, ew2 : _} -> {loc_in1, loc_in2 : _} -> Exp I64 loc_in1 ew1 [] -> Exp I64 loc_in2 ew2 [] -> Exp (Either T0 T0) loc EW []
+  I64Op2  : IntOp2 -> {ew1, ew2 : _} -> {r_in1, r_in2 : _} -> {loc_in1 : Loc r_in1} -> {loc_in2 : Loc r_in2} -> Exp I64 loc_in1 ew1 [] -> Exp I64 loc_in2 ew2 [] -> Exp I64 loc EW []
+  I64Cmp  : CmpOp  -> {ew1, ew2 : _} -> {r_in1, r_in2 : _} -> {loc_in1 : Loc r_in1} -> {loc_in2 : Loc r_in2} -> Exp I64 loc_in1 ew1 [] -> Exp I64 loc_in2 ew2 [] -> Exp (Either T0 T0) loc EW []
 
-  I64Op2CE : IntOp2 -> Int -> {ew2 : _} -> {loc_in2 : _} -> Exp I64 loc_in2 ew2 [] -> Exp I64 loc EW []
-  I64Op2EC : IntOp2 -> {ew1 : _} -> {loc_in1 : _} -> Exp I64 loc_in1 ew1 [] -> Int -> Exp I64 loc EW []
-  I64CmpC  : CmpOp  -> Int -> {ew2 : _} -> {loc_in2 : _} -> Exp I64 loc_in2 ew2 [] -> Exp (Either T0 T0) loc EW []
+  I64Op2CE : IntOp2 -> Int -> {ew2 : _} -> {r_in2 : _} -> {loc_in2 : Loc r_in2} -> Exp I64 loc_in2 ew2 [] -> Exp I64 loc EW []
+  I64Op2EC : IntOp2 -> {ew1 : _} -> {r_in1 : _} -> {loc_in1 : Loc r_in1} -> Exp I64 loc_in1 ew1 [] -> Int -> Exp I64 loc EW []
+  I64CmpC  : CmpOp  -> Int -> {ew2 : _} -> {r_in2 : _} -> {loc_in2 : Loc r_in2} -> Exp I64 loc_in2 ew2 [] -> Exp (Either T0 T0) loc EW []
 
   -- IO primops
-  PrintI64 : {ew_in : _} -> {loc_in : _} -> Exp I64 loc_in ew_in [] -> (() -> Exp t loc ew ews) -> Exp t loc ew ews
+  PrintI64 : {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp I64 loc_in ew_in [] -> (() -> Exp t loc ew ews) -> Exp t loc ew ews
 
   -- prints the buffer content at the location in hexadecimal
-  PrintValue : {loc_in : _} -> Exp t_in loc_in EW [] -> (() -> Exp t loc ew ews) -> Exp t loc ew ews
+  PrintValue : {t_in : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp t_in loc_in EW [] -> (() -> Exp t loc ew ews) -> Exp t loc ew ews
 
   -- internal
   Var : Exp t loc ew sew

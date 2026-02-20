@@ -60,8 +60,14 @@ addLoExp i e = modify {loExps $= insert i (MkLoExp e)}
 addHole : Int -> Int -> M ()
 addHole rid i = modify {holes $= insert rid i}
 
-lookupHole : Int -> M (Either HiExp LoExp)
-lookupHole rid = ?lookupHole1
+getHoleExp : Int -> M LoExp
+getHoleExp rid = do
+  pure ?lookupHole1
+  Just i <- gets $ lookup rid . (.holes)
+    | Nothing => assert_total $ idris_crash $ "missing hole for \{rid}"
+  Just le <- lookupLoExp i
+    | Nothing => assert_total $ idris_crash $ "missing LoExp for \{i}"
+  pure le
 
 {-
   TODO: share Ty and Ops between HiCal an LoCal
@@ -91,7 +97,7 @@ compileCmpOp = \case
   LT  => LT
   NE  => NE
 
-writeExp : {r : _} -> {loc : Loc r} -> Hi.Exp t -> M (Lo.Exp (compileTy t) loc EW [])
+writeExp : {t : _} -> {r : _} -> {loc : Loc r} -> Hi.Exp t -> M (Lo.Exp (compileTy t) loc EW [])
 
 {-
   IDEA:
@@ -272,10 +278,62 @@ writeExp (Var i) = lookupLoExp i >>= \case
          alias: infer destination locations
         Q: is it possible to compute it in a single linear pass?
 -}
-compileExp : {r : _} -> {loc : Loc r} -> Hi.Exp t -> M (Lo.Exp (compileTy t) loc EW [])
+compileExp : {t : _} -> {r : _} -> {loc : Loc r} -> Hi.Exp t -> M (Lo.Exp (compileTy t) loc EW [])
 
-fixHoles : (Lo.Exp t loc EW []) -> M (Lo.Exp t loc EW [])
-fixHoles (LetRegionValue (MkRegion rid) Var _) = lookupHole rid >>= \case
+fixHolesRead : {t : _} -> {r : _} -> {loc : Loc r} -> {ew : _} -> Lo.Exp t loc ew [] -> M (LoExp2 t)
+fixHolesRead (LetTick i e) = assert_total $ idris_crash "LetTick"
+fixHolesRead (LetRegionValue (MkRegion rid) Var _) = do
+  MkLoExp le <- getHoleExp rid
+  pure $ believe_me $ MkLoExp2 le
+
+fixHolesRead (LetRegionValue _ _ _) = assert_total $ idris_crash "LetRegionValue"
+fixHolesRead (NewCaseEither scrut l_cont r_cont) = assert_total $ idris_crash "NewCaseEither"
+fixHolesRead (PrintI64 a cont) = do
+  MkLoExp2 a_lo <- fixHolesRead a
+  MkLoExp2 cont_lo <- fixHolesRead $ cont ()
+  pure $ MkLoExp2 $ PrintI64 a_lo (\() => cont_lo)
+
+fixHolesRead (PrintValue a cont) = assert_total $ idris_crash "PrintValue"
+
+
+{-
+fixHolesWrite (PrintI64 a cont) = do
+  MkLoExp2 a_lo <- fixHolesRead a
+  cont_lo <- fixHolesWrite $ cont ()
+  pure $ PrintI64 a_lo (\() => cont_lo)
+-}
+fixHolesRead Var = assert_total $ idris_crash "Var" -- pure $ MkLoExp2 Var
+fixHolesRead v@(MkI64 i) = pure $ MkLoExp2 v
+fixHolesRead v@(MkT0) = pure $ MkLoExp2 v
+fixHolesRead _ = ?fixHolesRead1
+
+fixHolesWrite : {t : _} -> {r : _} -> {loc : Loc r} -> (Lo.Exp t loc EW []) -> M (Lo.Exp t loc EW [])
+fixHolesWrite (LetTick i e) = lookupLoExp i >>= \case
+  Just _ => fixHolesWrite e -- HINT: no allocation is needed because it is allocated
+  Nothing => do
+    -- the hi.exp has no destination so it is an intermediate value and needs a new region
+    MkHiExp {t=t_he} he <- getHiExp i
+    let val_r   = MkRegion !newId
+        val_t   = compileTy t_he
+        val_loc = LocStart val_t val_r
+    le <- writeExp {loc = val_loc} he
+    addLoExp {t=val_t} {loc=val_loc} i Var
+    e2 <- fixHolesWrite e
+    pure $ LetRegionValue {t_val = val_t} val_r (believe_me le) (\_ => e2)
+
+fixHolesWrite (LetRegionValue _ Var _) = assert_total $ idris_crash "fixHolesWrite - region hole"
+fixHolesWrite (LetRegionValue val_r val cont) = do
+  val2 <- fixHolesWrite val
+  cont2 <- fixHolesWrite $ cont Var
+  pure $ LetRegionValue val_r val2 (\_ => cont2)
+
+fixHolesWrite (NewCaseEither scrut l_cont r_cont) = do
+  MkLoExp2 scrut_lo <- fixHolesRead scrut
+  l_cont2 <- fixHolesWrite $ l_cont Var
+  r_cont2 <- fixHolesWrite $ r_cont Var
+  pure $ NewCaseEither scrut_lo (\_ => l_cont2) (\_ => r_cont2)
+
+{-
   Left (MkHiExp he) => do
     -- TODO: this is an impossible case, because LetTick will add the final lo.exp
     -- allocate region for intermediate value
@@ -283,8 +341,89 @@ fixHoles (LetRegionValue (MkRegion rid) Var _) = lookupHole rid >>= \case
   Right (MkLoExp le) => ?replaceHoleValue
     -- TODO: add decEq-s
     --pure le
+-}
+fixHolesWrite (I64Op2 op a b) = do
+  MkLoExp2 a_lo <- fixHolesRead a
+  MkLoExp2 b_lo <- fixHolesRead b
+  pure $ I64Op2 op a_lo b_lo
 
-fixHoles e = pure e
+fixHolesWrite (I64Cmp op a b) = do
+  MkLoExp2 a_lo <- fixHolesRead a
+  MkLoExp2 b_lo <- fixHolesRead b
+  pure $ I64Cmp op a_lo b_lo
+
+fixHolesWrite (I64Op2CE op a b) = do
+  MkLoExp2 b_lo <- fixHolesRead b
+  pure $ I64Op2CE op a b_lo
+
+fixHolesWrite (I64Op2EC op a b) = do
+  MkLoExp2 a_lo <- fixHolesRead a
+  pure $ I64Op2EC op a_lo b
+
+fixHolesWrite (I64CmpC op a b) = do
+  MkLoExp2 b_lo <- fixHolesRead b
+  pure $ I64CmpC op a b_lo
+
+
+fixHolesWrite (PrintI64 a cont) = do
+  MkLoExp2 a_lo <- fixHolesRead a
+  cont_lo <- fixHolesWrite $ cont ()
+  pure $ PrintI64 a_lo (\() => cont_lo)
+
+fixHolesWrite (PrintValue a cont) = do
+  MkLoExp2 a_lo <- fixHolesRead a
+  cont_lo <- fixHolesWrite $ cont ()
+  pure $ PrintValue a_lo (\() => cont_lo)
+
+fixHolesWrite (Copy a) = do
+  MkLoExp2 a_lo <- fixHolesRead a
+  pure $ Copy a_lo
+{-
+  FunAppNew : {res : _} -> {r_res : _} -> {loc_res : Loc r_res} ->
+  only read:
+    GetFst : {r_tup : _} -> {a, b : Ty} -> {loc_tup : Loc r_tup} -> {ew_tup : _} ->
+    GetSnd : {r_tup : _} -> {a, b : Ty} -> {loc_tup : Loc r_tup} -> {ew_tup: _} ->
+    GenEW : Exp t loc ew_in [] -> Exp t loc EW []
+    Var
+-}
+
+fixHolesWrite (MkPair a b) = [| MkPair (fixHolesWrite a) (fixHolesWrite b) |]
+fixHolesWrite (MkLeft a) = [| MkLeft (fixHolesWrite a) |]
+fixHolesWrite (MkRight a) = [| MkRight (fixHolesWrite a) |]
+fixHolesWrite (MkBox a) = [| MkBox (fixHolesWrite a) |]
+fixHolesWrite (UnBox a) = [| UnBox (fixHolesWrite a) |]
+fixHolesWrite MkT0 = pure MkT0
+fixHolesWrite (MkI64 i) = pure $ MkI64 i
+
+-- HINT: no GenEW in write position
+
+-- IDEA: handle only the possible constructors
+{-
+  impossible constructors:
+    MkOffset
+    DeRefOffset
+    MkPtr
+    DeRefPtr
+
+    LetRegion
+
+    StaticEW
+    PairEW
+    LeftEW
+    RightEW
+    AddEW
+
+  impossible at write, only at read:
+    Var
+    GenEW
+-}
+{-
+fixHolesWrite Var = pure Var
+fixHolesWrite (GenEW a) = do
+  MkLoExp2 a_lo <- fixHolesRead a
+  pure $ GenEW a_lo
+-}
+fixHolesWrite e = pure e
 
 {-
   TODO:
@@ -293,7 +432,7 @@ fixHoles e = pure e
       LetRegionValue Var  - lookup and replace region-id => hi.var-id => lo.exp l it must exist at this time
 -}
 
-compileExp e = fixHoles !(writeExp e)
+compileExp e = fixHolesWrite !(writeExp e)
 
 compileProgram : Hi.Program -> Lo.Program
 compileProgram (Main e) = Main $ evalState emptyLocState $ compileExp e
@@ -303,3 +442,15 @@ test = compileProgram $ Main $ Let MkT0 $ \t0 => MkPair t0 t0
 test2 = compileProgram $ Main $ PrintI64 (MkI64 1) $ \() => MkT0
 test3 = compileProgram $ Main $ Let (MkI64 1) $ \i => PrintI64 i $ \() => i
 test4 = compileProgram $ Main $ Let (MkI64 1) $ \i => MkPair (I64Op2 Plus i i) i
+{-
+  Main {res = Pair I64 I64}
+    (MkPair {{r:2038} = MkRegion -1} {a = I64} {b = I64} {loc = LocStart (Pair I64 I64) (MkRegion -1)}
+      (I64Op2 {{r:2529} = MkRegion -1} {{r:2528} = MkRegion -1} {{r:2527} = MkRegion -1}
+        {loc = LocAfterTag {r = MkRegion -1} "Pair" I64 (LocStart (Pair I64 I64) (MkRegion -1))}
+        Plus {ew1 = EW} {ew2 = EW}
+        {loc_in1 = LocAfter {r = MkRegion -1} I64 (LocAfterTag {r = MkRegion -1} "Pair" I64 (LocStart (Pair I64 I64) (MkRegion -1)))}
+        {loc_in2 = LocAfter {r = MkRegion -1} I64 (LocAfterTag {r = MkRegion -1} "Pair" I64 (LocStart (Pair I64 I64) (MkRegion -1)))}
+        (MkI64 {{r:2485} = MkRegion -1} {loc = LocAfter {r = MkRegion -1} I64 (LocAfterTag {r = MkRegion -1} "Pair" I64 (LocStart (Pair I64 I64) (MkRegion -1)))} 1)
+        (MkI64 {{r:2485} = MkRegion -1} {loc = LocAfter {r = MkRegion -1} I64 (LocAfterTag {r = MkRegion -1} "Pair" I64 (LocStart (Pair I64 I64) (MkRegion -1)))} 1))
+        (MkI64 {{r:2485} = MkRegion -1} {loc = LocAfter {r = MkRegion -1} I64 (LocAfterTag {r = MkRegion -1} "Pair" I64 (LocStart (Pair I64 I64) (MkRegion -1)))} 1))
+-}

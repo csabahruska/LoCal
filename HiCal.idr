@@ -37,8 +37,8 @@ data Exp where
   Let : {a: Ty} -> Exp a -> (Exp a -> Exp b) -> Exp b
 
   -- boxing
-  MkBox : {n : String} -> Exp t -> Exp (Box n t)
-  UnBox : Exp (Box _ t) -> Exp t
+  MkBox : {t : _} -> {n : String} -> Exp t -> Exp (Box n t)
+  UnBox : {t : _} -> {n : String} -> Exp (Box n t) -> Exp t
 
   -- value shapes, ADT can be modeled with these
 

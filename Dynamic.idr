@@ -12,21 +12,8 @@ import System.File
 import System
 import Decidable.Equality
 
-showRegion : Region -> String
-showRegion (MkRegion i) = "MkRegion \{i}"
-
-Show Region where show = showRegion
 Interpolation Region where interpolate = show
-
 Interpolation Ty where interpolate = showTy
-
-showLoc : Loc r -> String
-showLoc loc = case loc of
-  LocStart t r => "LocStart (\{show t}) (\{show r})"
-  LocAfter t l => "LocAfter (\{show t})\n (\{showLoc l})"
-  LocAfterTag s t l => "LocAfterTag \{s} (\{show t})\n (\{showLoc l})"
-
-Show (Loc r) where show = showLoc
 Interpolation (Loc r) where interpolate = show
 
 genCmpOp : CmpOp -> String
