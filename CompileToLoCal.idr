@@ -270,31 +270,31 @@ compileExp : {t : _} -> {r : _} -> {loc : Loc r} -> Hi.Exp t -> M (Lo.Exp (compi
   local exp:
     LetRegion       - not used
     LetRegionValue  - read, write   done: read, write
-    Copy            - read, write   done:       write
-    MkBox           - read, write   done:       write
-    UnBox           - read, write   done:       write
-    MkPair          - read, write   done:       write
-    MkLeft          - read, write   done:       write
-    MkRight         - read, write   done:       write
-    GetFst          - read
-    GetSnd          - read
-    NewCaseEither   - read, write   done:       write
+    Copy            - read, write   done: TODO  write
+    MkBox           - read, write   done: TODO  write
+    UnBox           - read, write   done: TODO  write
+    MkPair          - read, write   done: TODO  write
+    MkLeft          - read, write   done: TODO  write
+    MkRight         - read, write   done: TODO  write
+    GetFst          - read                TODO
+    GetSnd          - read                TODO
+    NewCaseEither   - read, write   done: TODO  write
     AddEW           - not used
-    FunAppNew       - read, write
+    FunAppNew       - read, write         TODO
     MkOffset        - not used
     DeRefOffset     - not used
     MkPtr           - not used
     DeRefPtr        - not used
     MkT0            - read, write   done: read, write
     MkI64           - read, write   done: read, write
-    I64Op2          - read, write   done:       write
-    I64Cmp          - read, write   done:       write
+    I64Op2          - read, write   done: TODO  write
+    I64Cmp          - read, write   done: TODO  write
     PrintI64        - read, write   done: read, write
     PrintValue      - read, write   done: read, write
     Var             - read          done: read
-    LetTick         - read, write   done:       write
+    LetTick         - read, write   done: TODO  write
     StaticEW        - not used
-    GenEW           - read
+    GenEW           - read                TODO
     PairEW          - not used
     LeftEW          - not used
     RightEW         - not used
@@ -309,9 +309,11 @@ fixHolesReadEW a = do
     No _     => assert_total $ idris_crash "EW mismatch"
     Yes Refl => pure $ MkLoExp2 a_lo
 
-fixHolesRead (LetRegionValue (MkRegion rid) Var _) = do
-  MkLoExp le <- getHoleExp rid
-  pure $ believe_me $ MkLoExp3 le
+fixHolesRead {t} (LetRegionValue (MkRegion rid) Var _) = do
+  MkLoExp {t=t_le} le <- getHoleExp rid
+  case decEq t t_le of
+    No _     => assert_total $ idris_crash "type mismatch"
+    Yes Refl => pure $ MkLoExp3 le
 
 fixHolesRead (LetRegionValue val_r val cont) = do
   val2 <- fixHolesWrite val
