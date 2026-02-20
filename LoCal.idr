@@ -117,6 +117,21 @@ public export DecEq (Loc r) where decEq = decEq @{FromEq}
 public export
 data EndWitness = NoEW | EW -- TODO: index it with Loc
 
+public export
+Uninhabited (EW = NoEW) where
+  uninhabited Refl impossible
+
+public export
+Uninhabited (NoEW = EW) where
+  uninhabited Refl impossible
+
+public export
+DecEq EndWitness where
+  decEq EW   EW   = Yes Refl
+  decEq NoEW NoEW = Yes Refl
+  decEq NoEW EW   = No absurd
+  decEq EW   NoEW = No absurd
+
 -- TODO: add linear arrows to guarantee that codegen happens for each expression exactly once
 {-
   Q: is LoCal program pure and can it be interpreted through data dependencies only where dependecy is sequential due to neighboring locations?
@@ -258,10 +273,6 @@ data Exp where
   -- I64 primops
   I64Op2  : IntOp2 -> {ew1, ew2 : _} -> {r_in1, r_in2 : _} -> {loc_in1 : Loc r_in1} -> {loc_in2 : Loc r_in2} -> Exp I64 loc_in1 ew1 [] -> Exp I64 loc_in2 ew2 [] -> Exp I64 loc EW []
   I64Cmp  : CmpOp  -> {ew1, ew2 : _} -> {r_in1, r_in2 : _} -> {loc_in1 : Loc r_in1} -> {loc_in2 : Loc r_in2} -> Exp I64 loc_in1 ew1 [] -> Exp I64 loc_in2 ew2 [] -> Exp (Either T0 T0) loc EW []
-
-  I64Op2CE : IntOp2 -> Int -> {ew2 : _} -> {r_in2 : _} -> {loc_in2 : Loc r_in2} -> Exp I64 loc_in2 ew2 [] -> Exp I64 loc EW []
-  I64Op2EC : IntOp2 -> {ew1 : _} -> {r_in1 : _} -> {loc_in1 : Loc r_in1} -> Exp I64 loc_in1 ew1 [] -> Int -> Exp I64 loc EW []
-  I64CmpC  : CmpOp  -> Int -> {ew2 : _} -> {r_in2 : _} -> {loc_in2 : Loc r_in2} -> Exp I64 loc_in2 ew2 [] -> Exp (Either T0 T0) loc EW []
 
   -- IO primops
   PrintI64 : {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp I64 loc_in ew_in [] -> (() -> Exp t loc ew ews) -> Exp t loc ew ews
