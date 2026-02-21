@@ -139,6 +139,7 @@ readExp (Var i) = lookupLoExp i >>= \case
     rid <- newId
     addHole rid i -- region-id => Hi.Var id
     pure $ MkLoExp2 $ LetRegionValue (MkRegion rid) Var id
+-- TODO: maybe other expressions are possible
 readExp e = do
   -- HINT: create region for intermediate value
   let r = MkRegion !newId
