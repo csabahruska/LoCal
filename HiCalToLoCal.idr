@@ -1,4 +1,4 @@
-module CompileToLoCal
+module HiCalToLoCal
 
 import Data.SortedMap
 import Control.Monad.State
