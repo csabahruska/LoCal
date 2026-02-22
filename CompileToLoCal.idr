@@ -352,26 +352,26 @@ writeExp (Var i) = lookupLoExp i >>= \case
 compileExp : {t : _} -> {r : _} -> {loc : Loc r} -> Hi.Exp t -> M (Lo.Exp (compileTy t) loc EW [])
 {-
   lo.exp semantics:
-    LetRegionValue  - read, write   done: read, write
-    Copy            - read, write   done: TODO  write
-    MkBox           - read, write   done: TODO  write
-    UnBox           - read, write   done: TODO  write
-    MkPair          - read, write   done: TODO  write
-    MkLeft          - read, write   done: TODO  write
-    MkRight         - read, write   done: TODO  write
-    GetFst          - read                TODO
-    GetSnd          - read                TODO
-    NewCaseEither   - read, write   done: TODO  write
-    FunAppNew       - read, write         TODO
-    MkT0            - read, write   done: read, write
-    MkI64           - read, write   done: read, write
-    I64Op2          - read, write   done: TODO  write
-    I64Cmp          - read, write   done: TODO  write
-    PrintI64        - read, write   done: read, write
-    PrintValue      - read, write   done: read, write
-    Var             - read          done: read
-    LetTick         - read, write   done: TODO  write
-    GenEW           - read                TODO
+    LetRegionValue  - read, write   rdone, wdone
+    Copy            - read, write   rdone, wdone   ; rsem: use loc
+    MkBox           - read, write   rdone, wdone   ; rsem: traverse exp
+    UnBox           - read, write   rdone, wdone   ; rsem: traverse exp
+    MkPair          - read, write   rdone, wdone   ; rsem: use loc
+    MkLeft          - read, write   rdone, wdone   ; rsem: use loc
+    MkRight         - read, write   rdone, wdone   ; rsem: use loc
+    GetFst          - read          TODO           ; rsem: traverse exp + recalculate loc
+    GetSnd          - read          TODO           ; rsem: traverse exp + recalculate loc
+    NewCaseEither   - read, write   TODO   wdone   ; rsem: traverse exp + recalculate loc
+    FunAppNew       - read, write   TODO   TODO
+    MkT0            - read, write   rdone, wdone   ; rsem: use loc
+    MkI64           - read, write   rdone, wdone   ; rsem: use loc
+    I64Op2          - read, write   rdone, wdone   ; rsem: use loc
+    I64Cmp          - read, write   rdone, wdone   ; rsem: use loc
+    PrintI64        - read, write   rdone, wdone
+    PrintValue      - read, write   rdone, wdone
+    Var             - read          rdone          ; rsem: use loc
+    LetTick         - read, write   TODO   wdone   ; rsem: traverse exp
+    GenEW           - read          TODO
     AddEW           - not used
     MkOffset        - not used
     DeRefOffset     - not used
@@ -417,14 +417,17 @@ fixHolesRead (PrintValue a cont) = do
 fixHolesRead (LetTick i e) = assert_total $ idris_crash "LetTick"
 fixHolesRead (NewCaseEither scrut l_cont r_cont) = assert_total $ idris_crash "NewCaseEither"
 -}
-fixHolesRead v@Var = pure $ MkLoExp3 v
-fixHolesRead v@(MkI64 i) = pure $ MkLoExp3 v
-fixHolesRead v@(MkT0) = pure $ MkLoExp3 v
-
-fixHolesRead {loc} (I64Op2 op a b) = do
-  MkLoExp3 a_lo <- fixHolesRead a
-  MkLoExp3 b_lo <- fixHolesRead b
-  pure $ MkLoExp3 {loc} $ I64Op2 op a_lo b_lo
+fixHolesRead v@Var              = pure $ MkLoExp3 v
+fixHolesRead {loc} (MkI64{})    = pure $ MkLoExp3 {loc, ew=EW} $ Var
+fixHolesRead {loc} (MkT0{})     = pure $ MkLoExp3 {loc, ew=EW} $ Var
+fixHolesRead {loc} (I64Op2{})   = pure $ MkLoExp3 {loc, ew=EW} $ Var
+fixHolesRead {loc} (I64Cmp{})   = pure $ MkLoExp3 {loc, ew=EW} $ Var
+fixHolesRead {loc} (Copy{})     = pure $ MkLoExp3 {loc, ew=EW} $ Var
+fixHolesRead {loc} (MkPair{})   = pure $ MkLoExp3 {loc, ew=EW} $ Var
+fixHolesRead {loc} (MkLeft{})   = pure $ MkLoExp3 {loc, ew=EW} $ Var
+fixHolesRead {loc} (MkRight{})  = pure $ MkLoExp3 {loc, ew=EW} $ Var
+fixHolesRead (MkBox a) = fixHolesRead a >>= \(MkLoExp3 {loc=a_loc, ew=a_ew} a_lo) => pure $ MkLoExp3 {loc=a_loc, ew=a_ew} Var
+fixHolesRead (UnBox a) = fixHolesRead a >>= \(MkLoExp3 {loc=a_loc, ew=a_ew} a_lo) => pure $ MkLoExp3 {loc=a_loc, ew=a_ew} Var
 
 fixHolesRead _ = ?fixHolesRead1
 
