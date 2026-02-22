@@ -117,6 +117,32 @@ writeExp : {t : _} -> {r : _} -> {loc : Loc r} -> Hi.Exp t -> M (Lo.Exp (compile
                   exist   ; replace Lo.Var with a new Lo.Var
 
 -}
+{-
+  hi.exp read semantics:
+    Let         - traverse read     wdone rdone
+    MkT0        - alloc region      wdone rdone
+    MkI64       - alloc region      wdone rdone
+    MkPair      - alloc region      wdone rdone
+    MkLeft      - alloc region      wdone rdone
+    MkRight     - alloc region      wdone rdone
+    FunAppNew   - alloc region      TODO  rdone
+    I64Op2      - alloc region      wdone rdone
+    I64Cmp      - alloc region      wdone rdone
+    MkBox       - traverse read     wdone rdone
+    UnBox       - traverse read     wdone rdone
+    CasePair    - traverse read     wdone rdone
+    CaseEither  - traverse read     wdone rdone
+    PrintI64    - traverse read     wdone rdone
+    PrintValue  - traverse read     wdone rdone
+    Var         - read              wdone rdone
+-}
+
+allocInNewRegion : {t : _} -> Hi.Exp t -> M (LoExp2 (compileTy t))
+allocInNewRegion e = do
+  -- HINT: create region for intermediate value
+  let r = MkRegion !newId
+  le <- writeExp {loc = LocStart (compileTy t) r} e
+  pure $ MkLoExp2 $ LetRegionValue r le id
 
 readExp : {t : _} -> Hi.Exp t -> M (LoExp2 (compileTy t))
 readExp (Var i) = lookupLoExp i >>= \case
@@ -140,11 +166,68 @@ readExp (Var i) = lookupLoExp i >>= \case
     addHole rid i -- region-id => Hi.Var id
     pure $ MkLoExp2 $ LetRegionValue (MkRegion rid) Var id
 -- TODO: maybe other expressions are possible
-readExp e = do
-  -- HINT: create region for intermediate value
-  let r = MkRegion !newId
-  le <- writeExp {loc = LocStart (compileTy t) r} e
-  pure $ MkLoExp2 $ LetRegionValue r le id
+readExp (UnBox a) = do
+  MkLoExp2 a_lo <- readExp a
+  pure $ MkLoExp2 $ UnBox a_lo
+
+readExp (MkBox a) = do
+  MkLoExp2 a_lo <- readExp a
+  pure $ MkLoExp2 $ MkBox a_lo
+
+readExp (PrintValue a cont) = do
+  MkLoExp2 a_lo <- readExp a
+  MkLoExp2 cont_lo <- readExp $ cont ()
+  pure $ MkLoExp2 $ PrintValue a_lo (\() => cont_lo)
+
+readExp (PrintI64 a cont) = do
+  MkLoExp2 a_lo <- readExp a
+  MkLoExp2 cont_lo <- readExp $ cont ()
+  pure $ MkLoExp2 $ PrintI64 a_lo (\() => cont_lo)
+
+readExp (CaseEither {a, b} scrut l_cont r_cont) = do
+  l <- newId
+  r <- newId
+      -- TODO: save these vars for substitution on the recovery pass
+      -- Q: or is this correct?
+  MkLoExp2 {loc=loc_scrut} scrut_lo <- readExp scrut
+  let locL = LocAfterTag "Left"  (compileTy a) loc_scrut
+      locR = LocAfterTag "Right" (compileTy b) loc_scrut
+  addLoExp {t=compileTy a} {loc=locL} l Var
+  addLoExp {t=compileTy b} {loc=locR} r Var
+  MkLoExp2 {r=l_r, loc=l_loc} l_cont_lo <- readExp $ l_cont $ Var l
+  MkLoExp2 {r=r_r, loc=r_loc} r_cont_lo <- readExp $ r_cont $ Var r
+  case decEq l_r r_r of
+    No _     => assert_total $ idris_crash "left - right region mismatch"
+    Yes Refl => case decEq l_loc r_loc of
+      No _     => assert_total $ idris_crash "left - right loc mismatch"
+      Yes Refl => pure $ MkLoExp2 $ NewCaseEither scrut_lo (\l => l_cont_lo) (\r => r_cont_lo)
+
+readExp (CasePair {a, b} tup cont) = do
+  fst <- newId
+  snd <- newId
+  {-
+    IDEA: replace fst and snd with GetFst <<comp a>> and GetSnd <comp a>> fst-ew
+  -}
+  MkLoExp2 {loc=loc_tup} tup_lo <- readExp tup
+  let ewFst = GenEW $ GetFst tup_lo
+  addLoExp fst ewFst
+  addLoExp snd $ GetSnd tup_lo ewFst
+  readExp $ cont (Var fst) (Var snd)
+
+readExp (Let v cont) = do
+  i <- newId
+  MkLoExp2 v_lo <- readExp v
+  addLoExp i v_lo
+  readExp $ cont $ Var i
+
+readExp e@(MkT0{})      = allocInNewRegion e
+readExp e@(MkI64{})     = allocInNewRegion e
+readExp e@(MkPair{})    = allocInNewRegion e
+readExp e@(MkLeft{})    = allocInNewRegion e
+readExp e@(MkRight{})   = allocInNewRegion e
+readExp e@(FunAppNew{}) = allocInNewRegion e
+readExp e@(I64Op2{})    = allocInNewRegion e
+readExp e@(I64Cmp{})    = allocInNewRegion e
 
 writeExp MkT0 = pure MkT0
 writeExp (MkI64 i) = pure $ MkI64 i
@@ -268,8 +351,7 @@ writeExp (Var i) = lookupLoExp i >>= \case
 -}
 compileExp : {t : _} -> {r : _} -> {loc : Loc r} -> Hi.Exp t -> M (Lo.Exp (compileTy t) loc EW [])
 {-
-  local exp:
-    LetRegion       - not used
+  lo.exp semantics:
     LetRegionValue  - read, write   done: read, write
     Copy            - read, write   done: TODO  write
     MkBox           - read, write   done: TODO  write
@@ -280,12 +362,7 @@ compileExp : {t : _} -> {r : _} -> {loc : Loc r} -> Hi.Exp t -> M (Lo.Exp (compi
     GetFst          - read                TODO
     GetSnd          - read                TODO
     NewCaseEither   - read, write   done: TODO  write
-    AddEW           - not used
     FunAppNew       - read, write         TODO
-    MkOffset        - not used
-    DeRefOffset     - not used
-    MkPtr           - not used
-    DeRefPtr        - not used
     MkT0            - read, write   done: read, write
     MkI64           - read, write   done: read, write
     I64Op2          - read, write   done: TODO  write
@@ -294,8 +371,14 @@ compileExp : {t : _} -> {r : _} -> {loc : Loc r} -> Hi.Exp t -> M (Lo.Exp (compi
     PrintValue      - read, write   done: read, write
     Var             - read          done: read
     LetTick         - read, write   done: TODO  write
-    StaticEW        - not used
     GenEW           - read                TODO
+    AddEW           - not used
+    MkOffset        - not used
+    DeRefOffset     - not used
+    MkPtr           - not used
+    DeRefPtr        - not used
+    LetRegion       - not used
+    StaticEW        - not used
     PairEW          - not used
     LeftEW          - not used
     RightEW         - not used
