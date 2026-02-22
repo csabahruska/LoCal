@@ -1,6 +1,6 @@
 module HiCalExamples
 
-import HiCal
+import HiCal as Hi
 
 public export
 AddI64C : Int -> Exp I64 -> Exp I64

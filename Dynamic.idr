@@ -143,17 +143,17 @@ assertWrite loc = do
   modify {local.write $= insert key}
 
 markAlreadyWritten : Loc r -> M a -> M a
-markAlreadyWritten = ?markAlreadyWritten1
+markAlreadyWritten _ _ = pure $ assert_total $ idris_crash $ "TODO - markAlreadyWritten"
 
 markWrite : Loc r -> M a -> M a
-markWrite loc action = ?markWrite1
+markWrite loc action = pure $ assert_total $ idris_crash $ "TODO - markWrite"
 {-
   assertWrite loc
   -- TODO: execute write actions
 -}
 
 markAlloc : Loc r -> M a -> M a
-markAlloc loc action = ?markAlloc1
+markAlloc loc action = pure $ assert_total $ idris_crash $ "TODO - markAlloc"
 {-
   -- TODO: assert it is not allocated yet
   -- execute alloc actions
@@ -217,10 +217,10 @@ genFunction fun_name action = do
 isNewFunction : String -> M Bool
 isNewFunction funName = pure $ isNothing (lookup funName !(gets code))
 
-getTy : {t : _} -> {0 l : Loc r} -> (Exp t l _) -> Ty
+getTy : {t : _} -> {0 l : Loc r} -> (Exp t l _ _) -> Ty
 getTy {t} _ = t
 
-getLoc : {t : _} -> {l : Loc r} -> (Exp t l _) -> Loc r
+getLoc : {t : _} -> {l : Loc r} -> (Exp t l _ _) -> Loc r
 getLoc {l} _ = l
 
 addCur : String -> Loc r -> M ()
@@ -257,7 +257,8 @@ getAllocatedCursor loc action = case !(lookupCursor loc) of
   Nothing  => addAllocAction loc $ getCursor loc >>= action
 
 getWrittenCursor : Loc r -> (String -> M ()) -> M ()
-getWrittenCursor loc action = ?getWrittenCursor1 -- case !(lookupCursor loc) of
+getWrittenCursor loc action = assert_total $ idris_crash $ "TODO - getWrittenCursor"
+--?getWrittenCursor1 -- case !(lookupCursor loc) of
 
 -- TODO: check that it is written only once ; use an effect map for LocVals
 -- TODO: make this continuation based, which can pospone action until the location could be generated, i.e. end-witness is added
@@ -310,13 +311,13 @@ defineEndWitness loc value = unless !(hasEndWitness loc) $ do
   modify {local.endwitness $= insert (show loc) ew}
   emit "char* \{ew} = \{value};"
 
-updateEndWitnessTo : {loc2 : _} -> (loc : Loc r) -> Exp _ loc2 _ -> M ()
+updateEndWitnessTo : {loc2 : _} -> (loc : Loc r) -> Exp _ loc2 _ _ -> M ()
 updateEndWitnessTo {loc2} loc e = do
   ew <- getEndWitness loc2
   modify {local.endwitness $= insert (show loc) ew}
   print $ colored BrightBlue " update endwitness to \{ew} for\n \{loc}\n\n"
 
-inheritEndWitness : {ew : _} -> {loc2 : Loc r2} -> (loc : Loc r) -> Exp _ loc2 ew -> M ()
+inheritEndWitness : {ew : _} -> {loc2 : Loc r2} -> (loc : Loc r) -> Exp _ loc2 ew _ -> M ()
 inheritEndWitness loc e = case ew of
   NoEW => pure ()
   EW   => updateEndWitnessTo loc e
@@ -344,8 +345,41 @@ addStaticSizeEndWitness l msg = do
   A: structure eliminators and function body
 -}
 
-partial fillDyn : {ew : _} -> {loc : _} -> Exp t loc ew -> M ()
-partial readDyn : {ew : _} -> {loc : _} -> Exp t loc ew -> M ()
+partial fillDyn : {ew : _} -> {loc : _} -> Exp t loc ew _ -> M ()
+partial readDyn : {ew : _} -> {loc : _} -> Exp t loc ew _ -> M ()
+
+{-
+  LetRegion       wdone
+  LetRegionValue  wdone
+  Copy            wdone
+  MkBox           wdone
+  UnBox           wdone
+  MkPair          wdone
+  MkLeft          wdone
+  MkRight         wdone
+  GetFst
+  GetSnd
+  NewCaseEither
+  AddEW
+  FunAppNew
+  MkOffset        wdone
+  DeRefOffset     wdone
+  MkPtr           wdone
+  DeRefPtr        wdone
+  MkT0            wdone
+  MkI64           wdone
+  I64Op2          wdone
+  I64Cmp          wdone
+  PrintI64        wdone
+  PrintValue      wdone
+  Var                   rdone
+  LetTick
+  StaticEW              rdone
+  GenEW
+  PairEW
+  LeftEW
+  RightEW
+-}
 
 -- ?? read or write
 fillDyn (MkBox v) = do
@@ -447,6 +481,7 @@ fillDyn (MkRight arg) = do
   markWrite loc $ pure ()
 
 -- primops
+{-
 fillDyn (I64Op2CE op {loc_in2} argC1 arg2) = do
   putStrLn " ++ I64Op2CE"
   readDyn arg2
@@ -462,7 +497,7 @@ fillDyn (I64Op2EC op {loc_in1} arg1 argC2) = do
   addStaticSizeEndWitness loc "I64Op2EC - result"
   getWrittenCursor loc_in1 $ \cur_in1 => do
     markWrite loc $ emit "*(int*) \{cur} = *(int*) \{cur_in1} \{op} \{argC2};"
-
+-}
 fillDyn (I64Op2 op {loc_in1, loc_in2} arg1 arg2) = do
   putStrLn " ++ I64Op2"
   readDyn arg1
@@ -482,7 +517,7 @@ fillDyn (I64Cmp op {loc_in1, loc_in2} arg1 arg2) = do
   getWrittenCursor loc_in1 $ \cur_in1 => do
     getWrittenCursor loc_in2 $ \cur_in2 => do
       markWrite loc $ emit "*(char*) \{cur} = (*(int*) \{cur_in1} \{op} *(int*) \{cur_in2}) ? 1 /*RIGHT_TAG*/ : 0 /*LEFT_TAG*/;"
-
+{-
 fillDyn (I64CmpC op argC1 {loc_in2} arg2) = do
   putStrLn " ++ I64CmpC"
   readDyn arg2
@@ -490,7 +525,7 @@ fillDyn (I64CmpC op argC1 {loc_in2} arg2) = do
   addStaticSizeEndWitness loc "I64CmpC - result"
   getWrittenCursor loc_in2 $ \cur_in2 => do
     markWrite loc $ emit "*(char*) \{cur} = (\{argC1} \{op} *(int*) \{cur_in2}) ? 1 /*RIGHT_TAG*/ : 0 /*LEFT_TAG*/;"
-
+-}
 fillDyn (PrintI64 {loc_in} v cont) = do
   putStrLn " ++ PrintI64"
   readDyn v
@@ -519,7 +554,7 @@ fillDyn (LetRegionValue {t_val} r v cont) = do
   markAlloc loc_start $ emit "char *\{c} = newRegion();"
   fillDyn v
   fillDyn (cont Var)
-
+{-
 fillDyn (CasePair {a, loc_tup} tup cont) = do
   putStrLn " ++ CasePair"
   readDyn tup
@@ -571,7 +606,7 @@ fillDyn (CaseEither {a, b, loc_scrut} scrut cont_left cont_right) = do
     -- add end-witness for loc_scrut ; this can be done when both left and right eliminator has it
     when (scrut_ew_left && scrut_ew_right) $ do
       defineEndWitness loc_scrut cur_tag_end_tmp
-
+-}
 fillDyn (Copy {loc_in} v) = do
   putStrLn " ++ Copy"
   readDyn v
@@ -582,6 +617,7 @@ fillDyn (Copy {loc_in} v) = do
     markWrite loc $ emit "memcpy(\{cur_dst}, \{cur_src}, \{cur_src_end} - \{cur_src});"
 
 -- TODO: input end-witness passing and return
+{-
 fillDyn (FunApp2 {loc_arg, loc_res} fun_name fun arg) = do
   putStrLn " ++ FunApp2 \{fun_name}"
   readDyn arg
@@ -612,7 +648,7 @@ fillDyn (FunApp2 {loc_arg, loc_res} fun_name fun arg) = do
         fillDyn res
         emit "return \{!(getEndWitness loc_res)};"
       emit "}"
-
+-}
 fillDyn e = readDyn e
 
 {-
@@ -620,11 +656,11 @@ fillDyn e = readDyn e
   - clarify the relation and semantics between fillDyn and evalEff
 -}
 
-readDyn (MkStaticEW v) = do
-  putStrLn " ++ MkStaticEW"
+readDyn (StaticEW v) = do
+  putStrLn " ++ StaticEW"
   readDyn v
-  addStaticSizeEndWitness loc  "MkStaticEW"
-
+  addStaticSizeEndWitness loc  "StaticEW"
+{-
 readDyn (AddLocAfter {b, locFst} v) = do
   putStrLn " ++ AddLocAfter"
   readDyn v
@@ -636,7 +672,7 @@ readDyn (InheritEW v) = do
   putStrLn " ++ InheritEW"
   readDyn v
   inheritEndWitness loc v
-
+-}
 readDyn Var = do
   putStrLn " ++ Var"
   getWrittenCursor loc $ \cur => do
@@ -670,7 +706,7 @@ c_header = """
   """
 
 partial public export
-toBufferDyn : {t : _} -> Exp t (LocStart t (MkRegion (-1))) EW -> IO String
+toBufferDyn : {t : _} -> Exp t (LocStart t (MkRegion (-1))) EW [] -> IO String
 toBufferDyn {t} e = do
   print $ background Yellow " ---- CODEGEN ----\n"
   putStrLn ""

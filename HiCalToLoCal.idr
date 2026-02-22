@@ -8,9 +8,6 @@ import Data.Primitives.Interpolation
 import HiCal as Hi
 import LoCal as Lo
 
-data LocInfo : Type where
-  MkLocInfo : {r : _} -> (loc : Loc r) -> LocInfo
-
 data HiExp : Type where
   MkHiExp : {t : _} -> Exp t -> HiExp
 
@@ -26,7 +23,6 @@ data LoExp3 : Lo.Ty -> Type where
 record LocState where
   constructor MkLocState
   counter   : Int
-  locInfos  : SortedMap Int LocInfo
   hiExps    : SortedMap Int HiExp
   loExps    : SortedMap Int LoExp
   holes     : SortedMap Int Int
@@ -34,13 +30,12 @@ record LocState where
 emptyLocState : LocState
 emptyLocState = MkLocState
   { counter   = 0
-  , locInfos  = empty
   , hiExps    = empty
   , loExps    = empty
   , holes     = empty
   }
 
-M = State LocState
+M = StateT LocState IO
 
 newId : M Int
 newId = state (\m => ({counter $= (+ 1)} m, m.counter))
@@ -65,7 +60,6 @@ addHole rid i = modify {holes $= insert rid i}
 
 getHoleExp : Int -> M LoExp
 getHoleExp rid = do
-  pure ?lookupHole1
   Just i <- gets $ lookup rid . (.holes)
     | Nothing => assert_total $ idris_crash $ "missing hole for \{rid}"
   Just le <- lookupLoExp i
@@ -565,7 +559,7 @@ fixHolesWrite (GenEW a) = do
   MkLoExp2 a_lo <- fixHolesRead a
   pure $ GenEW a_lo
 -}
-fixHolesWrite e = ?fixHolesWrite123
+fixHolesWrite e = assert_total $ idris_crash "fixHolesWrite - TODO"
 
 {-
   TODO:
@@ -576,23 +570,10 @@ fixHolesWrite e = ?fixHolesWrite123
 
 compileExp e = fixHolesWrite !(writeExp e)
 
-compileProgram : Hi.Program -> Lo.Program
-compileProgram (Main e) = Main $ evalState emptyLocState $ compileExp e
-
-test1, test2, test3, test4 : Lo.Program
-test1 = compileProgram $ Main $ Let MkT0 $ \t0 => MkPair t0 t0
-test2 = compileProgram $ Main $ PrintI64 (MkI64 1) $ \() => MkT0
-test3 = compileProgram $ Main $ Let (MkI64 1) $ \i => PrintI64 i $ \() => i
-test4 = compileProgram $ Main $ Let (MkI64 1) $ \i => MkPair (I64Op2 Plus i i) i
-{-
-  Main {res = Pair I64 I64}
-    (MkPair {{r:2038} = MkRegion -1} {a = I64} {b = I64} {loc = LocStart (Pair I64 I64) (MkRegion -1)}
-      (I64Op2 {{r:2529} = MkRegion -1} {{r:2528} = MkRegion -1} {{r:2527} = MkRegion -1}
-        {loc = LocAfterTag {r = MkRegion -1} "Pair" I64 (LocStart (Pair I64 I64) (MkRegion -1))}
-        Plus {ew1 = EW} {ew2 = EW}
-        {loc_in1 = LocAfter {r = MkRegion -1} I64 (LocAfterTag {r = MkRegion -1} "Pair" I64 (LocStart (Pair I64 I64) (MkRegion -1)))}
-        {loc_in2 = LocAfter {r = MkRegion -1} I64 (LocAfterTag {r = MkRegion -1} "Pair" I64 (LocStart (Pair I64 I64) (MkRegion -1)))}
-        (MkI64 {{r:2485} = MkRegion -1} {loc = LocAfter {r = MkRegion -1} I64 (LocAfterTag {r = MkRegion -1} "Pair" I64 (LocStart (Pair I64 I64) (MkRegion -1)))} 1)
-        (MkI64 {{r:2485} = MkRegion -1} {loc = LocAfter {r = MkRegion -1} I64 (LocAfterTag {r = MkRegion -1} "Pair" I64 (LocStart (Pair I64 I64) (MkRegion -1)))} 1))
-        (MkI64 {{r:2485} = MkRegion -1} {loc = LocAfter {r = MkRegion -1} I64 (LocAfterTag {r = MkRegion -1} "Pair" I64 (LocStart (Pair I64 I64) (MkRegion -1)))} 1))
--}
+public export compileProgram : Hi.Program -> IO Lo.Program
+compileProgram (Main e) = do
+  putStrLn "compileProgram - 1"
+  res <- evalStateT emptyLocState $ do
+    r <- compileExp e
+    pure $ Main r
+  pure $ Main MkT0--evalStateT emptyLocState $ [| Main $ compileExp e |]
