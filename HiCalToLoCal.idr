@@ -35,7 +35,7 @@ emptyLocState = MkLocState
   , holes     = empty
   }
 
-M = StateT LocState IO
+M = State LocState
 
 newId : M Int
 newId = state (\m => ({counter $= (+ 1)} m, m.counter))
@@ -327,6 +327,7 @@ writeExp (Var i) = lookupLoExp i >>= \case
     No _     => assert_total $ idris_crash "Var Lo.Ty mismatch2"
     Yes Refl => pure $ Copy le -- TODO: use indirection to keep sharing, but it would need changes in the exp type
 
+writeExp e = assert_total $ idris_crash "writeExp - TODO"
 
 {-
   IDEA:
@@ -377,6 +378,7 @@ compileExp : {t : _} -> {r : _} -> {loc : Loc r} -> Hi.Exp t -> M (Lo.Exp (compi
     LeftEW          - not used
     RightEW         - not used
 -}
+
 fixHolesReadEW  : {t : _} -> {r : _} -> {loc : Loc r} -> {ew : _} -> Lo.Exp t loc ew [] -> M (LoExp2 t)
 fixHolesRead    : {t : _} -> {r : _} -> {loc : Loc r} -> {ew : _} -> Lo.Exp t loc ew [] -> M (LoExp3 t)
 fixHolesWrite   : {t : _} -> {r : _} -> {loc : Loc r} -> (Lo.Exp t loc EW []) -> M (Lo.Exp t loc EW [])
@@ -481,15 +483,6 @@ fixHolesWrite (NewCaseEither scrut l_cont r_cont) = do
   r_cont2 <- fixHolesWrite $ r_cont Var
   pure $ NewCaseEither scrut_lo (\_ => l_cont2) (\_ => r_cont2)
 
-{-
-  Left (MkHiExp he) => do
-    -- TODO: this is an impossible case, because LetTick will add the final lo.exp
-    -- allocate region for intermediate value
-    ?allocIntermediateValue
-  Right (MkLoExp le) => ?replaceHoleValue
-    -- TODO: add decEq-s
-    --pure le
--}
 fixHolesWrite (I64Op2 op a b) = do
   MkLoExp3 a_lo <- fixHolesRead a
   MkLoExp3 b_lo <- fixHolesRead b
@@ -559,6 +552,7 @@ fixHolesWrite (GenEW a) = do
   MkLoExp2 a_lo <- fixHolesRead a
   pure $ GenEW a_lo
 -}
+
 fixHolesWrite e = assert_total $ idris_crash "fixHolesWrite - TODO"
 
 {-
@@ -570,10 +564,5 @@ fixHolesWrite e = assert_total $ idris_crash "fixHolesWrite - TODO"
 
 compileExp e = fixHolesWrite !(writeExp e)
 
-public export compileProgram : Hi.Program -> IO Lo.Program
-compileProgram (Main e) = do
-  putStrLn "compileProgram - 1"
-  res <- evalStateT emptyLocState $ do
-    r <- compileExp e
-    pure $ Main r
-  pure $ Main MkT0--evalStateT emptyLocState $ [| Main $ compileExp e |]
+public export compileProgram : Hi.Program -> Lo.Program
+compileProgram (Main e) = evalState emptyLocState $ [| Main $ compileExp e |]

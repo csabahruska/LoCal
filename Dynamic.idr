@@ -67,7 +67,6 @@ record CGLocal where
   constructor MkCGLocal
   locations     : SortedMap String String
   endwitness    : SortedMap String String
-  allocActions  : SortedMap String $ List $ M ()
   writeActions  : SortedMap String $ List $ M ()
   funName       : String
   indentLevel   : Nat
@@ -87,7 +86,6 @@ emptyCGLocal : CGLocal
 emptyCGLocal = MkCGLocal
   { locations     = empty
   , endwitness    = empty
-  , allocActions  = empty
   , writeActions  = empty
   , funName       = ""
   , indentLevel   = 0
@@ -105,9 +103,6 @@ emptyCG = MkCG
 
 -- actions
 
-addAllocAction : Loc r -> M () -> M ()
-addAllocAction loc act = modify {local.allocActions $= insertWith (++) (show loc) [act]}
-
 addWriteAction : Loc r -> M () -> M ()
 addWriteAction loc act = modify {local.writeActions $= insertWith (++) (show loc) [act]}
 
@@ -116,13 +111,19 @@ runActions f loc = case lookup (show loc) !(gets f) of
   Nothing   => pure ()
   Just acts => sequence_ acts
 
-runAllocActions : Loc r -> M ()
-runAllocActions = runActions (.local.allocActions)
-
 runWriteActions : Loc r -> M ()
-runWriteActions = runActions (.local.writeActions)
+runWriteActions loc = do
+  runActions (.local.writeActions) loc
+  -- clear actions
+  modify {local.writeActions $= delete (show loc)}
 
 -- assetions
+
+assertNoActionsLeft : M ()
+assertNoActionsLeft = do
+  wActs <- gets (.local.writeActions)
+  unless (null wActs) $ do
+    assert_total $ idris_crash $ "pending write actions for: \{unlines (keys wActs)}"
 
 assertRead : Loc r -> M ()
 assertRead loc = do
@@ -142,26 +143,30 @@ assertWrite loc = do
     --putStrLn $ "INTERNAL ERROR: multiple writes on \{loc}"
   modify {local.write $= insert key}
 
+-- TODO
+{-
+-- PURPOSE: get access to a sub value of an existing written value
 markAlreadyWritten : Loc r -> M a -> M a
-markAlreadyWritten _ _ = pure $ assert_total $ idris_crash $ "TODO - markAlreadyWritten"
+markAlreadyWritten _ action = action -- pure $ assert_total $ idris_crash $ "TODO - markAlreadyWritten"
+-}
 
 markWrite : Loc r -> M a -> M a
-markWrite loc action = pure $ assert_total $ idris_crash $ "TODO - markWrite"
-{-
+markWrite loc action = do
+  -- NOTE: check if loc is written only once
   assertWrite loc
-  -- TODO: execute write actions
--}
+  res <- action
+  runWriteActions loc
+  pure res
 
 markAlloc : Loc r -> M a -> M a
-markAlloc loc action = pure $ assert_total $ idris_crash $ "TODO - markAlloc"
 {-
-  -- TODO: assert it is not allocated yet
-  -- execute alloc actions
-  runAllocActions loc
-  -- HINT: run future code actions, or should this run after the first write? t depends, the actions could be tied for allocation or for writes
-  --        this is action running after allocation
+  PURPOSE: check if a location is allocated only once
+  DESIGN: allocations can not be postponed
+          reads always come after writes
 -}
-
+markAlloc loc action = case lookup (show loc) !(gets (.local.locations)) of
+  Just c  => assert_total $ idris_crash $ "\{c} is already allocated for \{loc}"
+  Nothing => action
 
 newId : M Int
 newId = state (\m => ({counter $= (+ 1)} m, m.counter))
@@ -251,14 +256,12 @@ getCursor loc = do
         | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc cursor for \{loc}\n locations map: \{show locs}"
   pure cur
 
-getAllocatedCursor : Loc r -> (String -> M ()) -> M ()
-getAllocatedCursor loc action = case !(lookupCursor loc) of
-  Just cur => action cur
-  Nothing  => addAllocAction loc $ getCursor loc >>= action
-
 getWrittenCursor : Loc r -> (String -> M ()) -> M ()
-getWrittenCursor loc action = assert_total $ idris_crash $ "TODO - getWrittenCursor"
---?getWrittenCursor1 -- case !(lookupCursor loc) of
+getWrittenCursor loc action = do
+  let act = getCursor loc >>= action
+  if contains (show loc) !(gets (.local.write))
+    then act
+    else addWriteAction loc act
 
 -- TODO: check that it is written only once ; use an effect map for LocVals
 -- TODO: make this continuation based, which can pospone action until the location could be generated, i.e. end-witness is added
@@ -268,12 +271,6 @@ getWrittenCursor loc action = assert_total $ idris_crash $ "TODO - getWrittenCur
 allocCursor : (loc : Loc r) -> M String
 allocCursor loc = do
   -- putStrLn " !! gen cursor for \{loc}"
-  let locKey = show loc
-  {-
-    gen new if does not exist
-    return exisiting when available
-  -}
-  locs <- gets (.local.locations)
   let newCur = do
         c <- newCursorName
         print $ colored BrightRed " !! add cursor \{c} :=\n \{loc}\n\n"
@@ -281,23 +278,23 @@ allocCursor loc = do
         addCur c loc
         emit "/* \{c} = \{loc} */"
         pure c
-  case lookup locKey !(gets (.local.locations)) of
-    Just v  => assert_total $ idris_crash $ "cursor '\{v}' is already generated for \{loc}" -- Q: idk if this is right, because reads can reuse cursors
-    Nothing => do
+  markAlloc loc $ do
       case loc of
-        LocStart _ _ => assert_total $ idris_crash $ "can not allocate LocStart"
+        LocStart _ _ => do
+          c <- newCur
+          emit "char* \{c} = newRegion();"
+          pure c
         LocAfter _ l => do
           c <- newCur
-          markAlloc loc $ emit "char* \{c} = \{!(getEndWitness l)};"
+          emit "char* \{c} = \{!(getEndWitness l)};"
           pure c
         LocAfterTag s fstTy l => do
           let tagSize : Int = case s of
                 "Pair"  => 0
                 _       => 1
           c <- newCur
-          markAlloc loc $ emit "char* \{c} = \{!(getCursor l)} + \{tagSize};"
+          emit "char* \{c} = \{!(getCursor l)} + \{tagSize};"
           pure c
-
 
 hasEndWitness : Loc r -> M Bool
 hasEndWitness loc = do
@@ -439,9 +436,10 @@ fillDyn (DeRefPtr {x, r_in, loc_in} v cont) = do
     cur <- newCursorName
     let r_val = MkRegion !newId
         loc_val = LocStart x r_val
-    addCur cur loc_val
     emit "/* \{cur} = \{loc_val} */"
-    markAlloc loc $ emit "char* \{cur} = *(char**)\{cur_in}; // DeRefPtr"
+    markAlloc loc $ do
+      addCur cur loc_val
+      emit "char* \{cur} = *(char**)\{cur_in}; // DeRefPtr"
     markWrite loc $ pure ()
     fillDyn (cont {r_val} Var)
 {-
@@ -456,9 +454,10 @@ fillDyn (DeRefOffset {x, r_in, loc_in} v cont) = do
     cur <- newCursorName
     let r_val = MkRegion !newId
         loc_val = LocStart x r_val
-    addCur cur loc_val
     emit "/* \{cur} = \{loc_val} */"
-    markAlloc loc $ emit "char* \{cur} = \{cur_in} + *(int*)\{cur_in}; // DeRefOffset"
+    markAlloc loc $ do
+      addCur cur loc_val
+      emit "char* \{cur} = \{cur_in} + *(int*)\{cur_in}; // DeRefOffset"
     markWrite loc $ pure ()
     fillDyn (cont {r_val} Var)
 
@@ -531,7 +530,7 @@ fillDyn (PrintI64 {loc_in} v cont) = do
   readDyn v
   getWrittenCursor loc_in $ \cur_in => do
     emit "printf(\"%d\\n\", *(int*) \{cur_in});"
-    fillDyn $ cont ()
+  fillDyn $ cont ()
 
 fillDyn (PrintValue {loc_in} v cont) = do
   putStrLn " ++ PrintValue"
@@ -539,7 +538,7 @@ fillDyn (PrintValue {loc_in} v cont) = do
   getWrittenCursor loc_in $ \cur_in => do
     cur_end <- getEndWitness loc_in
     emit "print_hex(\{cur_in}, \{cur_end} - \{cur_in});"
-    fillDyn $ cont ()
+  fillDyn $ cont ()
 
 fillDyn (LetRegion cont) = do
   putStrLn " ++ LetRegion"
@@ -548,10 +547,6 @@ fillDyn (LetRegion cont) = do
 
 fillDyn (LetRegionValue {t_val} r v cont) = do
   putStrLn " ++ LetRegionValue"
-  c <- newCursorName
-  let loc_start = LocStart t_val r
-  addCur c loc_start
-  markAlloc loc_start $ emit "char *\{c} = newRegion();"
   fillDyn v
   fillDyn (cont Var)
 {-
@@ -673,12 +668,19 @@ readDyn (InheritEW v) = do
   readDyn v
   inheritEndWitness loc v
 -}
+
+readDyn (MkI64{}) = pure ()
+
 readDyn Var = do
   putStrLn " ++ Var"
   getWrittenCursor loc $ \cur => do
     emit "/* \{cur} = \{loc} */"
     emit "// Var \{getLocTy loc}" -- assert_total $ idris_crash $ "Var"
 
+readDyn (LetRegionValue _ v cont) = do
+  putStrLn " ++ LetRegionValue (read)"
+  fillDyn v
+  readDyn (cont Var)
 
 
 c_header : String
@@ -714,6 +716,7 @@ toBufferDyn {t} e = do
     genFunction "main" $ do
       emit "void main() {"
       indent $ fillDyn $ LetRegionValue (MkRegion (-1)) e id
+      assertNoActionsLeft
       emit "}"
   putStrLn " ---- CODE OUTPUT ----"
   pure $ unlines $ c_header :: [unlines (reverse funLines) | funLines <- s.decls :: values s.code]
