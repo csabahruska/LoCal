@@ -269,7 +269,7 @@ getWrittenCursor loc action = do
 --          this mean that fillDyn always progress, and it creates cursors, bit not necessary writes the content
 --         in case of reads the cursos allocation must progress also, because the EDSL API guarantees ???? IDK, what does it guarantees?
 allocCursor : (loc : Loc r) -> M String
-allocCursor loc = do
+allocCursor loc = markAlloc loc $ do
   -- putStrLn " !! gen cursor for \{loc}"
   let newCur = do
         c <- newCursorName
@@ -278,23 +278,22 @@ allocCursor loc = do
         addCur c loc
         emit "/* \{c} = \{loc} */"
         pure c
-  markAlloc loc $ do
-      case loc of
-        LocStart _ _ => do
-          c <- newCur
-          emit "char* \{c} = newRegion();"
-          pure c
-        LocAfter _ l => do
-          c <- newCur
-          emit "char* \{c} = \{!(getEndWitness l)};"
-          pure c
-        LocAfterTag s fstTy l => do
-          let tagSize : Int = case s of
-                "Pair"  => 0
-                _       => 1
-          c <- newCur
-          emit "char* \{c} = \{!(getCursor l)} + \{tagSize};"
-          pure c
+  case loc of
+    LocStart _ _ => do
+      c <- newCur
+      emit "char* \{c} = newRegion();"
+      pure c
+    LocAfter _ l => do
+      c <- newCur
+      emit "char* \{c} = \{!(getEndWitness l)};"
+      pure c
+    LocAfterTag s fstTy l => do
+      let tagSize : Int = case s of
+            "Pair"  => 0
+            _       => 1
+      c <- newCur
+      emit "char* \{c} = \{!(getCursor l)} + \{tagSize};"
+      pure c
 
 hasEndWitness : Loc r -> M Bool
 hasEndWitness loc = do
@@ -342,41 +341,18 @@ addStaticSizeEndWitness l msg = do
   A: structure eliminators and function body
 -}
 
-partial fillDyn : {ew : _} -> {loc : _} -> Exp t loc ew _ -> M ()
-partial readDyn : {ew : _} -> {loc : _} -> Exp t loc ew _ -> M ()
+ensureWritten : Loc r -> M ()
+ensureWritten loc = getWrittenCursor loc $ \_ => pure () -- this action will be consumed at write, or will make assertNoActionsLeft fail
 
-{-
-  LetRegion       wdone
-  LetRegionValue  wdone
-  Copy            wdone
-  MkBox           wdone
-  UnBox           wdone
-  MkPair          wdone
-  MkLeft          wdone
-  MkRight         wdone
-  GetFst
-  GetSnd
-  NewCaseEither
-  AddEW
-  FunAppNew
-  MkOffset        wdone
-  DeRefOffset     wdone
-  MkPtr           wdone
-  DeRefPtr        wdone
-  MkT0            wdone
-  MkI64           wdone
-  I64Op2          wdone
-  I64Cmp          wdone
-  PrintI64        wdone
-  PrintValue      wdone
-  Var                   rdone
-  LetTick
-  StaticEW              rdone
-  GenEW
-  PairEW
-  LeftEW
-  RightEW
--}
+data CGMode = FillDyn | ReadDyn
+
+fillDyn : {ew : _} -> {loc : _} -> Exp t loc ew _ -> M ()
+partial readDyn : {ew : _} -> {loc : _} -> Exp t loc ew _ -> M ()
+evalCont : {ew : _} -> {loc : _} -> Exp t loc ew _ -> CGMode -> M ()
+
+evalCGMode : CGMode -> {ew : _} -> {loc : _} -> Exp t loc ew _ -> M ()
+evalCGMode FillDyn = fillDyn
+evalCGMode ReadDyn = readDyn
 
 -- ?? read or write
 fillDyn (MkBox v) = do
@@ -404,11 +380,11 @@ fillDyn (MkPair va vb) = do
   putStrLn " ++ MkPair"
   _ <- allocCursor loc
   fillDyn va
-  -- TODO: wait for written va
   fillDyn vb
-  -- TODO: wait for written vb
   inheritEndWitness loc vb
-  markWrite loc $ pure ()
+  getWrittenCursor (getLoc va) $ \_ => do
+    getWrittenCursor (getLoc vb) $ \_ => do
+      markWrite loc $ pure ()
 
 fillDyn (MkPtr {loc_in} v) = do
   putStrLn " ++ MkPtr"
@@ -428,56 +404,28 @@ fillDyn (MkOffset {loc_in} v) = do
   getWrittenCursor loc_in $ \cur_in => do
     markWrite loc $ emit "*(int*) \{cur} = \{cur_in} - \{cur};"
 
-fillDyn (DeRefPtr {x, r_in, loc_in} v cont) = do
-  putStrLn " ++ DeRefPtr"
-  readDyn v
-  getWrittenCursor loc_in $ \cur_in => do
-    -- generate new cursor name for loc_val
-    cur <- newCursorName
-    let r_val = MkRegion !newId
-        loc_val = LocStart x r_val
-    emit "/* \{cur} = \{loc_val} */"
-    markAlloc loc $ do
-      addCur cur loc_val
-      emit "char* \{cur} = *(char**)\{cur_in}; // DeRefPtr"
-    markWrite loc $ pure ()
-    fillDyn (cont {r_val} Var)
 {-
   TODO:
     - add assertions when alloc and actions were not run in the end of codegen
 -}
-fillDyn (DeRefOffset {x, r_in, loc_in} v cont) = do
-  putStrLn " ++ DeRefPtr"
-  readDyn v
-  getWrittenCursor loc_in $ \cur_in => do
-    -- generate new cursor name for loc_val
-    cur <- newCursorName
-    let r_val = MkRegion !newId
-        loc_val = LocStart x r_val
-    emit "/* \{cur} = \{loc_val} */"
-    markAlloc loc $ do
-      addCur cur loc_val
-      emit "char* \{cur} = \{cur_in} + *(int*)\{cur_in}; // DeRefOffset"
-    markWrite loc $ pure ()
-    fillDyn (cont {r_val} Var)
 
 fillDyn (MkLeft arg) = do
   putStrLn " ++ MkLeft"
   cur <- allocCursor loc
   emit "*(char*) \{cur} = 0; // LEFT_TAG"
   fillDyn arg
-  -- TODO: wait for written arg
   inheritEndWitness loc arg
-  markWrite loc $ pure ()
+  getWrittenCursor (getLoc arg) $ \_ => do
+    markWrite loc $ pure ()
 
 fillDyn (MkRight arg) = do
   putStrLn " ++ MkRight"
   cur <- allocCursor loc
   emit "*(char*) \{cur} = 1; // RIGHT_TAG"
   fillDyn arg
-  -- TODO: wait for written arg
   inheritEndWitness loc arg
-  markWrite loc $ pure ()
+  getWrittenCursor (getLoc arg) $ \_ => do
+    markWrite loc $ pure ()
 
 -- primops
 {-
@@ -525,30 +473,7 @@ fillDyn (I64CmpC op argC1 {loc_in2} arg2) = do
   getWrittenCursor loc_in2 $ \cur_in2 => do
     markWrite loc $ emit "*(char*) \{cur} = (\{argC1} \{op} *(int*) \{cur_in2}) ? 1 /*RIGHT_TAG*/ : 0 /*LEFT_TAG*/;"
 -}
-fillDyn (PrintI64 {loc_in} v cont) = do
-  putStrLn " ++ PrintI64"
-  readDyn v
-  getWrittenCursor loc_in $ \cur_in => do
-    emit "printf(\"%d\\n\", *(int*) \{cur_in});"
-  fillDyn $ cont ()
 
-fillDyn (PrintValue {loc_in} v cont) = do
-  putStrLn " ++ PrintValue"
-  readDyn v
-  getWrittenCursor loc_in $ \cur_in => do
-    cur_end <- getEndWitness loc_in
-    emit "print_hex(\{cur_in}, \{cur_end} - \{cur_in});"
-  fillDyn $ cont ()
-
-fillDyn (LetRegion cont) = do
-  putStrLn " ++ LetRegion"
-  let r = MkRegion !newId
-  fillDyn (cont r)
-
-fillDyn (LetRegionValue {t_val} r v cont) = do
-  putStrLn " ++ LetRegionValue"
-  fillDyn v
-  fillDyn (cont Var)
 {-
 fillDyn (CasePair {a, loc_tup} tup cont) = do
   putStrLn " ++ CasePair"
@@ -644,17 +569,96 @@ fillDyn (FunApp2 {loc_arg, loc_res} fun_name fun arg) = do
         emit "return \{!(getEndWitness loc_res)};"
       emit "}"
 -}
-fillDyn e = readDyn e
 
+fillDyn e@(LetRegionValue{}) = evalCont e FillDyn
+fillDyn e@(LetRegion{}) = evalCont e FillDyn
+fillDyn e@(PrintI64{}) = evalCont e FillDyn
+fillDyn e@(PrintValue{}) = evalCont e FillDyn
+fillDyn e@(DeRefOffset{}) = evalCont e FillDyn
+fillDyn e@(DeRefPtr{}) = evalCont e FillDyn
+
+fillDyn (NewCaseEither{}) = assert_total $ idris_crash $ "fillDyn - NewCaseEither"
+fillDyn (FunAppNew{}) = assert_total $ idris_crash $ "fillDyn - FunAppNew"
+fillDyn (LetTick _ v) = fillDyn v
+
+fillDyn (AddEW{}) = assert_total $ idris_crash $ "fillDyn - AddEW"
+fillDyn (Var{}) = assert_total $ idris_crash $ "fillDyn - Var"
+fillDyn (GetFst{}) = assert_total $ idris_crash $ "fillDyn - GetFst"
+fillDyn (GetSnd{}) = assert_total $ idris_crash $ "fillDyn - GetSnd"
+fillDyn (StaticEW{}) = assert_total $ idris_crash $ "fillDyn - StaticEW"
+fillDyn (GenEW{}) = assert_total $ idris_crash $ "fillDyn - GenEW"
+fillDyn (PairEW{}) = assert_total $ idris_crash $ "fillDyn - PairEW"
+fillDyn (LeftEW{}) = assert_total $ idris_crash $ "fillDyn - LeftEW"
+fillDyn (RightEW{}) = assert_total $ idris_crash $ "fillDyn - RightEW"
 {-
   TODO:
   - clarify the relation and semantics between fillDyn and evalEff
 -}
 
+-----------------
+evalCont (LetRegionValue _ v cont) mode = do
+  putStrLn " ++ LetRegionValue"
+  fillDyn v
+  evalCGMode mode (cont Var)
+
+evalCont (LetRegion cont) mode = do
+  putStrLn " ++ LetRegion"
+  let r = MkRegion !newId
+  evalCGMode mode (cont r)
+
+evalCont (PrintI64 {loc_in} v cont) mode = do
+  putStrLn " ++ PrintI64 (read)"
+  readDyn v
+  getWrittenCursor loc_in $ \cur_in => do
+    emit "printf(\"%d\\n\", *(int*) \{cur_in});"
+  evalCGMode mode $ cont ()
+
+evalCont (PrintValue {loc_in} v cont) mode = do
+  putStrLn " ++ PrintValue (read)"
+  readDyn v
+  getWrittenCursor loc_in $ \cur_in => do
+    cur_end <- getEndWitness loc_in
+    emit "print_hex(\{cur_in}, \{cur_end} - \{cur_in});"
+  evalCGMode mode $ cont ()
+
+evalCont (DeRefOffset {x, r_in, loc_in} v cont) mode = do
+  putStrLn " ++ DeRefPtr (read)"
+  readDyn v
+  getWrittenCursor loc_in $ \cur_in => do
+    -- generate new cursor name for loc_val
+    cur <- newCursorName
+    let r_val = MkRegion !newId
+        loc_val = LocStart x r_val
+    emit "/* \{cur} = \{loc_val} */"
+    markAlloc loc $ do
+      addCur cur loc_val
+      emit "char* \{cur} = \{cur_in} + *(int*)\{cur_in}; // DeRefOffset"
+    markWrite loc $ pure ()
+    evalCGMode mode (cont {r_val} Var)
+
+evalCont (DeRefPtr {x, r_in, loc_in} v cont) mode = do
+  putStrLn " ++ DeRefPtr"
+  readDyn v
+  getWrittenCursor loc_in $ \cur_in => do
+    -- generate new cursor name for loc_val
+    cur <- newCursorName
+    let r_val = MkRegion !newId
+        loc_val = LocStart x r_val
+    emit "/* \{cur} = \{loc_val} */"
+    markAlloc loc $ do
+      addCur cur loc_val
+      emit "char* \{cur} = *(char**)\{cur_in}; // DeRefPtr"
+    markWrite loc $ pure ()
+    evalCGMode mode (cont {r_val} Var)
+
+evalCont _ _ = assert_total $ idris_crash $ "evalCont TODO"
+-----------------
+
 readDyn (StaticEW v) = do
   putStrLn " ++ StaticEW"
   readDyn v
   addStaticSizeEndWitness loc  "StaticEW"
+
 {-
 readDyn (AddLocAfter {b, locFst} v) = do
   putStrLn " ++ AddLocAfter"
@@ -669,19 +673,61 @@ readDyn (InheritEW v) = do
   inheritEndWitness loc v
 -}
 
-readDyn (MkI64{}) = pure ()
+{-
+  LetRegion       wdone rdone                           cont
+  LetRegionValue  wdone rdone                           cont
+  Copy            wdone rdone   rsem = ensure written
+  MkBox           wdone rdone   rsem = traverse
+  UnBox           wdone rdone   rsem = traverse
+  MkPair          wdone rdone   rsem = ensure written
+  MkLeft          wdone rdone   rsem = ensure written
+  MkRight         wdone rdone   rsem = ensure written
+  GetFst                TODO
+  GetSnd                TODO
+  NewCaseEither   TODO  TODO                            cont
+  AddEW           TODO  ??
+  FunAppNew       TODO  TODO    rsem = traverse         cont
+  MkOffset        wdone rdone   rsem = ensure written
+  DeRefOffset     wdone rdone   rsem = traverse         cont
+  MkPtr           wdone rdone   rsem = ensure written
+  DeRefPtr        wdone rdone   rsem = traverse         cont
+  MkT0            wdone rdone   rsem = ensure written
+  MkI64           wdone rdone   rsem = ensure written
+  I64Op2          wdone rdone   rsem = ensure written
+  I64Cmp          wdone rdone   rsem = ensure written
+  PrintI64        wdone rdone   rsem = traverse         cont
+  PrintValue      wdone rdone   rsem = traverse         cont
+  Var                   rdone   rsem = ensure written
+  LetTick         wdone rdone   wsem = rsem = traverse
+  StaticEW              rdone
+  GenEW                 TODO
+  PairEW                TODO
+  LeftEW                TODO
+  RightEW               TODO
+-}
 
-readDyn Var = do
-  putStrLn " ++ Var"
-  getWrittenCursor loc $ \cur => do
-    emit "/* \{cur} = \{loc} */"
-    emit "// Var \{getLocTy loc}" -- assert_total $ idris_crash $ "Var"
+readDyn (I64Cmp{})    = ensureWritten loc
+readDyn (I64Op2{})    = ensureWritten loc
+readDyn (MkI64{})     = ensureWritten loc
+readDyn (MkT0{})      = ensureWritten loc
+readDyn (MkPtr{})     = ensureWritten loc
+readDyn (MkOffset{})  = ensureWritten loc
+readDyn (MkRight{})   = ensureWritten loc
+readDyn (MkLeft{})    = ensureWritten loc
+readDyn (MkPair{})    = ensureWritten loc
+readDyn (Copy{})      = ensureWritten loc
+readDyn (Var{})       = ensureWritten loc
 
-readDyn (LetRegionValue _ v cont) = do
-  putStrLn " ++ LetRegionValue (read)"
-  fillDyn v
-  readDyn (cont Var)
+readDyn (MkBox v) = readDyn v
+readDyn (UnBox v) = readDyn v
+readDyn (LetTick _ v) = readDyn v
 
+readDyn e@(LetRegionValue{}) = evalCont e ReadDyn
+readDyn e@(LetRegion{}) = evalCont e ReadDyn
+readDyn e@(PrintI64{}) = evalCont e ReadDyn
+readDyn e@(PrintValue{}) = evalCont e ReadDyn
+readDyn e@(DeRefOffset{}) = evalCont e ReadDyn
+readDyn e@(DeRefPtr{}) = evalCont e ReadDyn
 
 c_header : String
 c_header = """
@@ -715,7 +761,7 @@ toBufferDyn {t} e = do
   s <- execStateT emptyCG $ do
     genFunction "main" $ do
       emit "void main() {"
-      indent $ fillDyn $ LetRegionValue (MkRegion (-1)) e id
+      indent $ readDyn $ LetRegionValue (MkRegion (-1)) e id
       assertNoActionsLeft
       emit "}"
   putStrLn " ---- CODE OUTPUT ----"
