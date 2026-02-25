@@ -65,6 +65,7 @@ M = StateT CG IO
 
 record CGLocal where
   constructor MkCGLocal
+  preallocs     : SortedMap String String
   locations     : SortedMap String String
   endwitness    : SortedMap String String
   writeActions  : SortedMap String $ List $ M ()
@@ -84,7 +85,8 @@ record CG where
 
 emptyCGLocal : CGLocal
 emptyCGLocal = MkCGLocal
-  { locations     = empty
+  { preallocs     = empty
+  , locations     = empty
   , endwitness    = empty
   , writeActions  = empty
   , funName       = ""
@@ -143,12 +145,11 @@ assertWrite loc = do
     --putStrLn $ "INTERNAL ERROR: multiple writes on \{loc}"
   modify {local.write $= insert key}
 
--- TODO
-{-
 -- PURPOSE: get access to a sub value of an existing written value
 markAlreadyWritten : Loc r -> M a -> M a
-markAlreadyWritten _ action = action -- pure $ assert_total $ idris_crash $ "TODO - markAlreadyWritten"
--}
+markAlreadyWritten loc action = do
+  modify {local.write $= insert (show loc)}
+  action
 
 markWrite : Loc r -> M a -> M a
 markWrite loc action = do
@@ -182,7 +183,7 @@ indent m = do
   modify {local.indentLevel := l}
   pure res
 
--- TODO: what about alloc actions?
+-- TODO: what about alloc and read actions?
 localScope : M a -> M a
 localScope m = do
   locs <- gets (.local.locations)
@@ -231,6 +232,9 @@ getLoc {l} _ = l
 addCur : String -> Loc r -> M ()
 addCur c l = modify {local.locations $= insert (show l) c}
 
+preallocCursor : String -> Loc r -> M ()
+preallocCursor c l = modify {local.preallocs $= insert (show l) c}
+
 -- IDEA: use Loc values in Map as keys via its show function
 
 lookupEndWitness : (loc : Loc r) -> M (Maybe String)
@@ -253,7 +257,7 @@ getCursor : (loc : Loc r) -> M String
 getCursor loc = do
   locs <- gets (.local.locations)
   let Just cur = lookup (show loc) locs
-        | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc cursor for \{loc}\n locations map: \{show locs}"
+        | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc cursor for:\n \{loc}\n\n locations map: \{show locs}"
   pure cur
 
 getWrittenCursor : Loc r -> (String -> M ()) -> M ()
@@ -269,31 +273,39 @@ getWrittenCursor loc action = do
 --          this mean that fillDyn always progress, and it creates cursors, bit not necessary writes the content
 --         in case of reads the cursos allocation must progress also, because the EDSL API guarantees ???? IDK, what does it guarantees?
 allocCursor : (loc : Loc r) -> M String
-allocCursor loc = markAlloc loc $ do
-  -- putStrLn " !! gen cursor for \{loc}"
-  let newCur = do
-        c <- newCursorName
-        print $ colored BrightRed " !! add cursor \{c} :=\n \{loc}\n\n"
-        print $ colored BrightMagenta " !! static index \{c} := \{show (getStaticIndex loc)}\n\n"
-        addCur c loc
-        emit "/* \{c} = \{loc} */"
+allocCursor loc = markAlloc loc $ case lookup (show loc) !(gets (.local.preallocs)) of
+  Just c  => addCur c loc >> pure c
+  Nothing => do
+    -- putStrLn " !! gen cursor for \{loc}"
+    let newCur = do
+          c <- newCursorName
+          print $ colored BrightRed " !! add cursor \{c} :=\n \{loc}\n\n"
+          print $ colored BrightMagenta " !! static index \{c} := \{show (getStaticIndex loc)}\n\n"
+          addCur c loc
+          emit "/* \{c} = \{loc} */"
+          pure c
+    case loc of
+      LocStart _ _ => do
+        c <- newCur
+        emit "char* \{c} = newRegion();"
         pure c
-  case loc of
-    LocStart _ _ => do
-      c <- newCur
-      emit "char* \{c} = newRegion();"
-      pure c
-    LocAfter _ l => do
-      c <- newCur
-      emit "char* \{c} = \{!(getEndWitness l)};"
-      pure c
-    LocAfterTag s fstTy l => do
-      let tagSize : Int = case s of
-            "Pair"  => 0
-            _       => 1
-      c <- newCur
-      emit "char* \{c} = \{!(getCursor l)} + \{tagSize};"
-      pure c
+      LocAfter _ l => do
+        c <- newCur
+        emit "char* \{c} = \{!(getEndWitness l)};"
+        pure c
+      LocAfterTag s fstTy l => do
+        let tagSize : Int = case s of
+              "Pair"  => 0
+              _       => 1
+        c <- newCur
+        emit "char* \{c} = \{!(getCursor l)} + \{tagSize};"
+        pure c
+
+allocCursorIfNeeded : (loc : Loc r) -> M String
+allocCursorIfNeeded loc = do
+  Just cur <- lookupCursor loc
+    | Nothing => allocCursor loc
+  pure cur
 
 hasEndWitness : Loc r -> M Bool
 hasEndWitness loc = do
@@ -302,8 +314,9 @@ hasEndWitness loc = do
 
 defineEndWitness : (loc : Loc r) -> String -> M ()
 defineEndWitness loc value = unless !(hasEndWitness loc) $ do
-  cur <- getCursor loc
-  let ew = "\{cur}_end"
+  ew <- case !(lookupCursor loc) of
+    Nothing   => newCursorName
+    Just cur  => pure "\{cur}_end"
   modify {local.endwitness $= insert (show loc) ew}
   emit "char* \{ew} = \{value};"
 
@@ -347,7 +360,7 @@ ensureWritten loc = getWrittenCursor loc $ \_ => pure () -- this action will be 
 data CGMode = FillDyn | ReadDyn
 
 fillDyn : {ew : _} -> {loc : _} -> Exp t loc ew _ -> M ()
-partial readDyn : {ew : _} -> {loc : _} -> Exp t loc ew _ -> M ()
+readDyn : {ew : _} -> {loc : _} -> Exp t loc ew _ -> M ()
 evalCont : {ew : _} -> {loc : _} -> Exp t loc ew _ -> CGMode -> M ()
 
 evalCGMode : CGMode -> {ew : _} -> {loc : _} -> Exp t loc ew _ -> M ()
@@ -474,17 +487,7 @@ fillDyn (I64CmpC op argC1 {loc_in2} arg2) = do
     markWrite loc $ emit "*(char*) \{cur} = (\{argC1} \{op} *(int*) \{cur_in2}) ? 1 /*RIGHT_TAG*/ : 0 /*LEFT_TAG*/;"
 -}
 
-{-
-fillDyn (CasePair {a, loc_tup} tup cont) = do
-  putStrLn " ++ CasePair"
-  readDyn tup
-  getWrittenCursor loc_tup $ \_ => do -- Q: should we require allocation only?
-    let locFst = LocAfterTag "Pair" a loc_tup
-    _ <- allocCursor locFst
-    markAlreadyWritten locFst $ pure ()
-    fillDyn $ cont Var AddLocAfter {tup_ew_fun = InheritEW}
-
-fillDyn (CaseEither {a, b, loc_scrut} scrut cont_left cont_right) = do
+fillDyn (NewCaseEither {a, b, loc_scrut} scrut cont_left cont_right) = do
   lift $ putStrLn " ++ CaseEither"
   readDyn scrut
   getWrittenCursor loc_scrut $ \cur_tag => do
@@ -505,7 +508,7 @@ fillDyn (CaseEither {a, b, loc_scrut} scrut cont_left cont_right) = do
     emit "if (*(char*) \{cur_tag} == 0) { // LEFT"
     (scrut_ew_left, left_cglocal) <- indent $ localScope $ do
       _ <- markAlreadyWritten locL $ allocCursor locL
-      let expL = cont_left Var {either_ew_fun = InheritEW}
+      let expL = cont_left Var
       fillDyn expL
       emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expL)};"
       pure (!writeScrutEW, !(gets (.local)))
@@ -513,7 +516,7 @@ fillDyn (CaseEither {a, b, loc_scrut} scrut cont_left cont_right) = do
     emit "} else { // RIGHT"
     (scrut_ew_right, right_cglocal) <- indent $ localScope $ do
       _ <- markAlreadyWritten locR $ allocCursor locR
-      let expR = cont_right Var {either_ew_fun = InheritEW}
+      let expR = cont_right Var
       fillDyn expR
       emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expR)};"
       pure (!writeScrutEW, !(gets (.local)))
@@ -526,7 +529,8 @@ fillDyn (CaseEither {a, b, loc_scrut} scrut cont_left cont_right) = do
     -- add end-witness for loc_scrut ; this can be done when both left and right eliminator has it
     when (scrut_ew_left && scrut_ew_right) $ do
       defineEndWitness loc_scrut cur_tag_end_tmp
--}
+
+
 fillDyn (Copy {loc_in} v) = do
   putStrLn " ++ Copy"
   readDyn v
@@ -537,38 +541,51 @@ fillDyn (Copy {loc_in} v) = do
     markWrite loc $ emit "memcpy(\{cur_dst}, \{cur_src}, \{cur_src_end} - \{cur_src});"
 
 -- TODO: input end-witness passing and return
-{-
-fillDyn (FunApp2 {loc_arg, loc_res} fun_name fun arg) = do
-  putStrLn " ++ FunApp2 \{fun_name}"
-  readDyn arg
-  cur_out <- allocCursor loc_res
-  getWrittenCursor loc_arg $ \cur_in => do
-    -- HINT: fun may or may not need arg end witness
-    --    Q: how to handle this?
-    --    A: arg end-witness is not needed
+fillDyn (FunAppNew {fun_ews, loc_res} fun_name fun args) = do
+  putStrLn " ++ FunAppNew \{fun_name}"
+  let readArgs : Arg _ -> M ()
+      readArgs (Arg0) = pure ()
+      readArgs (ArgN e a) = readDyn e >> readArgs a
+  readArgs args
+  -- TODO: handle returning ews
+  unless (null fun_ews) $ assert_total $ idris_crash $ "TODO - handle FunAppNew fun_ews"
 
-    -- TODO: omit end-witness for static sized outputs
-    markWrite loc_res $ defineEndWitness loc_res "\{fun_name}(\{cur_in}, \{cur_out})"
+  cur_out <- allocCursor loc_res
+  let buildCall : List String -> Arg _ -> M ()
+      buildCall curs (ArgN {loc=loc_arg} _ a) = getWrittenCursor loc_arg $ \cur_in => buildCall (cur_in :: curs) a
+      buildCall curs Arg0 = markWrite loc_res $ defineEndWitness loc_res "\{fun_name}(\{joinBy ", " $ reverse curs}, \{cur_out})"
+  buildCall [] args
 
   -- codegen function if needed
   when !(isNewFunction fun_name) $ do
     genFunction fun_name $ do
-      -- TODO: support multi parameter functions
-      -- TODO: pass arg's pointers entry if any
-      cur_arg <- newCursorName
+      -- TODO: pass arg's pointers entry if any -- what is this???
       cur_out <- newCursorName
-      markAlreadyWritten loc_arg $ markAlloc loc_arg $ addCur cur_arg loc_arg
-      markAlloc loc_res $ addCur cur_out loc_res
-      emitDecl "char* \{fun_name}(char* \{cur_arg}, char* \{cur_out});"
-      emit "char* \{fun_name}(char* \{cur_arg}, char* \{cur_out}) {"
+      preallocCursor cur_out loc_res
+
+      let buildParams : List String -> List String -> Arg _ -> M (List String, List String)
+          buildParams params paramDocs Arg0 = pure (params, paramDocs)
+          buildParams params paramDocs (ArgN {loc=loc_arg} _ a) = do
+            cur_arg <- newCursorName
+            markAlreadyWritten loc_arg $ markAlloc loc_arg $ addCur cur_arg loc_arg
+            buildParams ("char* \{cur_arg}" :: params) ("/* \{cur_arg} = \{loc_arg} */" :: paramDocs) a
+
+      (params, paramDocs) <- buildParams [] [] args
+
+      let toParams : Arg a -> Arg a
+          toParams Arg0 = Arg0
+          toParams (ArgN e a) = ArgN Var $ toParams a
+
+          paramDecls = joinBy ", " $ reverse params
+
+      emitDecl "char* \{fun_name}(\{paramDecls}, char* \{cur_out});"
+      emit "char* \{fun_name}(\{paramDecls}, char* \{cur_out}) {"
       indent $ do
-        emit "/* \{cur_arg} = \{loc_arg} */"
+        for_ paramDocs emit
         emit "/* \{cur_out} = \{loc_res} */"
-        let (res) = fun Var
-        fillDyn res
+        fillDyn $ fun $ toParams args
         emit "return \{!(getEndWitness loc_res)};"
       emit "}"
--}
 
 fillDyn e@(LetRegionValue{}) = evalCont e FillDyn
 fillDyn e@(LetRegion{}) = evalCont e FillDyn
@@ -577,12 +594,13 @@ fillDyn e@(PrintValue{}) = evalCont e FillDyn
 fillDyn e@(DeRefOffset{}) = evalCont e FillDyn
 fillDyn e@(DeRefPtr{}) = evalCont e FillDyn
 
-fillDyn (NewCaseEither{}) = assert_total $ idris_crash $ "fillDyn - NewCaseEither"
-fillDyn (FunAppNew{}) = assert_total $ idris_crash $ "fillDyn - FunAppNew"
 fillDyn (LetTick _ v) = fillDyn v
 
+fillDyn (NewCaseEither{}) = assert_total $ idris_crash $ "fillDyn - NewCaseEither"
+
 fillDyn (AddEW{}) = assert_total $ idris_crash $ "fillDyn - AddEW"
-fillDyn (Var{}) = assert_total $ idris_crash $ "fillDyn - Var"
+fillDyn (GetEWS{}) = assert_total $ idris_crash $ "fillDyn - GetEWS"
+fillDyn (Var{}) = ensureWritten loc -- this is needed for NewFunApp result, is this ok?? assert_total $ idris_crash $ "fillDyn - Var"
 fillDyn (GetFst{}) = assert_total $ idris_crash $ "fillDyn - GetFst"
 fillDyn (GetSnd{}) = assert_total $ idris_crash $ "fillDyn - GetSnd"
 fillDyn (StaticEW{}) = assert_total $ idris_crash $ "fillDyn - StaticEW"
@@ -630,10 +648,10 @@ evalCont (DeRefOffset {x, r_in, loc_in} v cont) mode = do
     let r_val = MkRegion !newId
         loc_val = LocStart x r_val
     emit "/* \{cur} = \{loc_val} */"
-    markAlloc loc $ do
+    markAlloc loc_val $ do
       addCur cur loc_val
       emit "char* \{cur} = \{cur_in} + *(int*)\{cur_in}; // DeRefOffset"
-    markWrite loc $ pure ()
+    markWrite loc_val $ pure ()
     evalCGMode mode (cont {r_val} Var)
 
 evalCont (DeRefPtr {x, r_in, loc_in} v cont) mode = do
@@ -645,10 +663,10 @@ evalCont (DeRefPtr {x, r_in, loc_in} v cont) mode = do
     let r_val = MkRegion !newId
         loc_val = LocStart x r_val
     emit "/* \{cur} = \{loc_val} */"
-    markAlloc loc $ do
+    markAlloc loc_val $ do
       addCur cur loc_val
       emit "char* \{cur} = *(char**)\{cur_in}; // DeRefPtr"
-    markWrite loc $ pure ()
+    markWrite loc_val $ pure ()
     evalCGMode mode (cont {r_val} Var)
 
 evalCont _ _ = assert_total $ idris_crash $ "evalCont TODO"
@@ -682,11 +700,11 @@ readDyn (InheritEW v) = do
   MkPair          wdone rdone   rsem = ensure written
   MkLeft          wdone rdone   rsem = ensure written
   MkRight         wdone rdone   rsem = ensure written
-  GetFst                TODO
-  GetSnd                TODO
-  NewCaseEither   TODO  TODO                            cont
+  GetFst                rdone
+  GetSnd                rdone
+  NewCaseEither   wdone TODO                            cont
   AddEW           TODO  ??
-  FunAppNew       TODO  TODO    rsem = traverse         cont
+  FunAppNew       wdone WIP     rsem = traverse         cont
   MkOffset        wdone rdone   rsem = ensure written
   DeRefOffset     wdone rdone   rsem = traverse         cont
   MkPtr           wdone rdone   rsem = ensure written
@@ -729,6 +747,31 @@ readDyn e@(PrintValue{}) = evalCont e ReadDyn
 readDyn e@(DeRefOffset{}) = evalCont e ReadDyn
 readDyn e@(DeRefPtr{}) = evalCont e ReadDyn
 
+readDyn (GetFst {a, loc_tup} tup) = do
+  readDyn tup
+  getWrittenCursor loc_tup $ \_ => do
+    let locFst = LocAfterTag "Pair" a loc_tup
+    _ <- allocCursorIfNeeded locFst
+    markAlreadyWritten locFst $ pure ()
+
+readDyn (GetSnd {a, b, loc_tup} tup fst) = do
+  readDyn tup
+  readDyn fst
+  getWrittenCursor (getLoc fst) $ \_ => do
+    let locFst = LocAfterTag "Pair" a loc_tup
+        locSnd = LocAfter b locFst
+    _ <- allocCursorIfNeeded locSnd
+    markAlreadyWritten locSnd $ pure ()
+
+readDyn (AddEW{}) = assert_total $ idris_crash $ "readDyn - AddEW"
+readDyn (FunAppNew{}) = assert_total $ idris_crash $ "readDyn - FunAppNew"
+readDyn (GenEW{}) = assert_total $ idris_crash $ "readDyn - GenEW"
+readDyn (GetEWS{}) = assert_total $ idris_crash $ "readDyn - GetEWS"
+readDyn (LeftEW{}) = assert_total $ idris_crash $ "readDyn - LeftEW"
+readDyn (NewCaseEither{}) = assert_total $ idris_crash $ "readDyn - NewCaseEither"
+readDyn (PairEW{}) = assert_total $ idris_crash $ "readDyn - PairEW"
+readDyn (RightEW{}) = assert_total $ idris_crash $ "readDyn - RightEW"
+
 c_header : String
 c_header = """
   #include <stdio.h>
@@ -753,7 +796,7 @@ c_header = """
 
   """
 
-partial public export
+public export
 toBufferDyn : {t : _} -> Exp t (LocStart t (MkRegion (-1))) EW [] -> IO String
 toBufferDyn {t} e = do
   print $ background Yellow " ---- CODEGEN ----\n"

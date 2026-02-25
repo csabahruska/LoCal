@@ -242,13 +242,12 @@ data Exp where
 
   -- IDEA: store end-witnesses as an index in Exp
   AddEW : Exp t1 loc1 EW [] -> Exp t2 loc2 ew2 ews2 -> Exp t2 loc2 ew2 (Exp t1 loc1 EW [] :: ews2)
+  GetEWS : Exp _ _ _ fun_ews -> (Arg fun_ews -> Exp c loc ew ews) -> Exp c loc ew ews
 
-  FunAppNew : {res : _} -> {r_res : _} -> {loc_res : Loc r_res} ->
+  FunAppNew : {fun_ews : _} -> {res : _} -> {r_res : _} -> {loc_res : Loc r_res} ->
            String ->
            (fun_def : Arg exps_in -> Exp res loc_res EW fun_ews) ->
-           (fun_args : Arg exps_in) ->
-           (Arg fun_ews -> Exp res loc_res EW [] -> Exp c loc ew ews) ->
-           Exp c loc ew ews
+           (fun_args : Arg exps_in) -> Exp res loc_res EW fun_ews
 
   -- indirection, within same region
   MkOffset    : {ew_in : _} -> {r : _} -> {loc, loc_in : Loc r} -> Exp x loc_in ew_in [] -> Exp (Offset x) loc EW []

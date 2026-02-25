@@ -465,7 +465,7 @@ test_12 =
               FunApp "genList" genList next $ \res =>
               -}
               -- working
-              FunAppNew "genList" genList (ArgN next Arg0) $ \Arg0, res =>
+              let res = FunAppNew "genList" genList (ArgN next Arg0) in
               --FunApp "genList" genList next $ \res =>
               MkLeft $ let i = Copy $ StaticEW i in MkPair (MkOffset i) $ MkPair (MkBox res) i
           )
@@ -479,7 +479,7 @@ test_12 =
               let lst = GetFst $ GetSnd l $ StaticEW ofs in
               DeRefOffset ofs $ \i =>
               PrintI64 i $ \_ =>
-              FunAppNew "printList" printList (ArgN (UnBox lst) Arg0) $ \Arg0, res => res
+              FunAppNew "printList" printList (ArgN (UnBox lst) Arg0)
           )
           (\r => MkT0)
 
@@ -492,7 +492,7 @@ test_12 =
               let lst = GetFst $ GetSnd l $ StaticEW ofs in
               DeRefOffset ofs $ \i =>
 
-              FunAppNew "mapSuccList" mapSuccList (ArgN (UnBox lst) Arg0) $ \Arg0, res =>
+              let res = FunAppNew "mapSuccList" mapSuccList (ArgN (UnBox lst) Arg0) in
               MkLeft $ let i = StaticEW $ AddI64C 1 i in MkPair (MkOffset i) $ MkPair (MkBox res) i
               -- TODO: return input end-witness
           )
@@ -510,8 +510,8 @@ test_12 =
               LetRegion $ \r =>
               LetRegionValue r (LtI64C 5 i) $ \b =>
               NewCaseEither b
-                (\f => FunAppNew "filterLt5List" filterLt5List (ArgN (UnBox lst) Arg0) $ \Arg0, res => res)
-                (\t => FunAppNew "filterLt5List" filterLt5List (ArgN (UnBox lst) Arg0) $ \Arg0, res =>
+                (\f => FunAppNew "filterLt5List" filterLt5List (ArgN (UnBox lst) Arg0))
+                (\t => let res = FunAppNew "filterLt5List" filterLt5List (ArgN (UnBox lst) Arg0) in
                        MkLeft $ let i = Copy $ StaticEW i in MkPair (MkOffset i) $ MkPair (MkBox res) i
                 )
               -- TODO: return input end-witness
@@ -533,7 +533,7 @@ test_12 =
               let ofs = GetFst l in
               let lst = GetFst $ GetSnd l $ StaticEW ofs in
               DeRefOffset ofs $ \i =>
-              FunAppNew "copyList" copyList (ArgN (UnBox lst) Arg0) $ \Arg0, res =>
+              let res = FunAppNew "copyList" copyList (ArgN (UnBox lst) Arg0) in
               MkLeft $ let i = Copy $ StaticEW i in MkPair (MkOffset i) $ MkPair (MkBox res) i
               -- TODO: return input end-witness
           )
@@ -551,19 +551,19 @@ test_12 =
               let ofs = GetFst l in
               let lst = GetFst $ GetSnd l $ StaticEW ofs in
               DeRefOffset ofs $ \i =>
-              FunAppNew "appendList" appendList (ArgN (UnBox lst) $ ArgN b Arg0) $ \Arg0, res =>
+              let res = FunAppNew "appendList" appendList (ArgN (UnBox lst) $ ArgN b Arg0) in
               MkLeft $ let i = Copy $ StaticEW i in MkPair (MkOffset i) $ MkPair (MkBox res) i
               -- TODO: return input end-witness
           )
-          (\r => FunAppNew "copyList" copyList (ArgN b Arg0) $ \Arg0, res => res)
+          (\r => FunAppNew "copyList" copyList (ArgN b Arg0))
 
   in Main $
       LetRegion $ \r =>
       LetRegionValue r (MkI64 1) $ \i =>
       LetRegion $ \r =>
-      LetRegionValue r (FunAppNew "genList" genList (ArgN i Arg0) $ \Arg0, res => res) $ \l =>
+      LetRegionValue r (FunAppNew "genList" genList (ArgN i Arg0)) $ \l =>
       PrintValue l $ \_ =>
-      FunAppNew "printList" printList (ArgN l Arg0) $ \Arg0, res => res
+      FunAppNew "printList" printList (ArgN l Arg0)
 
 
 test_13 : Program
@@ -598,7 +598,7 @@ test_15 =
   in Main $
       LetRegion $ \r =>
       LetRegionValue r (MkPair (MkI64 7) (MkI64 8)) $ \t1 =>
-      FunAppNew "printPair" printPair (ArgN t1 Arg0) $ \Arg0, res => res
+      FunAppNew "printPair" printPair (ArgN t1 Arg0)
 
 test_16 : Program
 test_16 =
@@ -612,7 +612,7 @@ test_16 =
   in Main $
       LetRegion $ \r =>
       LetRegionValue r (MkPair (MkI64 7) (MkI64 8)) $ \t1 =>
-      FunAppNew "printPair" printPair (ArgN t1 Arg0) $ \Arg0, res => res
+      FunAppNew "printPair" printPair (ArgN t1 Arg0)
 
 test_17 : Program
 test_17 =
@@ -626,7 +626,7 @@ test_17 =
   in Main $
       LetRegion $ \r =>
       LetRegionValue r (MkPair (MkI64 7) (MkI64 8)) $ \t1 =>
-      FunAppNew "printPair" printPair (ArgN t1 Arg0) $ \Arg0, res => res
+      FunAppNew "printPair" printPair (ArgN t1 Arg0)
 
 test_20 : Program
 test_20 =
@@ -641,7 +641,7 @@ test_20 =
   in Main $
       LetRegion $ \r =>
       LetRegionValue r (MkPair (MkI64 7) (MkI64 8)) $ \t1 =>
-      FunAppNew "printPair2" printPair2 (ArgN t1 Arg0) $ \Arg0, res => res
+      FunAppNew "printPair2" printPair2 (ArgN t1 Arg0)
 
 -- test
 --compileProgram : String -> Program -> IO String
