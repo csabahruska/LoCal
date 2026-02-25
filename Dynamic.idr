@@ -704,7 +704,7 @@ readDyn (InheritEW v) = do
   GetSnd                rdone
   NewCaseEither   wdone TODO                            cont
   AddEW           TODO  ??
-  FunAppNew       wdone WIP     rsem = traverse         cont
+  FunAppNew       wdone rdone   rsem = traverse         cont
   MkOffset        wdone rdone   rsem = ensure written
   DeRefOffset     wdone rdone   rsem = traverse         cont
   MkPtr           wdone rdone   rsem = ensure written
@@ -735,6 +735,7 @@ readDyn (MkLeft{})    = ensureWritten loc
 readDyn (MkPair{})    = ensureWritten loc
 readDyn (Copy{})      = ensureWritten loc
 readDyn (Var{})       = ensureWritten loc
+readDyn (FunAppNew{}) = ensureWritten loc
 
 readDyn (MkBox v) = readDyn v
 readDyn (UnBox v) = readDyn v
@@ -764,7 +765,6 @@ readDyn (GetSnd {a, b, loc_tup} tup fst) = do
     markAlreadyWritten locSnd $ pure ()
 
 readDyn (AddEW{}) = assert_total $ idris_crash $ "readDyn - AddEW"
-readDyn (FunAppNew{}) = assert_total $ idris_crash $ "readDyn - FunAppNew"
 readDyn (GenEW{}) = assert_total $ idris_crash $ "readDyn - GenEW"
 readDyn (GetEWS{}) = assert_total $ idris_crash $ "readDyn - GetEWS"
 readDyn (LeftEW{}) = assert_total $ idris_crash $ "readDyn - LeftEW"
