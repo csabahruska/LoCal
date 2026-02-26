@@ -6,6 +6,7 @@ import LoCal as Lo
 import Dynamic as Lo
 import System
 import System.File
+import HiCalExamples
 
 partial test0, test1, test2, test3, test4 : Lo.Program
 test0 = Hi.compileProgram $ Main MkT0
@@ -34,4 +35,5 @@ main = do
   _ <- Lo.compileProgram "hi_test02" test2
   _ <- Lo.compileProgram "hi_test03" test3
   _ <- Lo.compileProgram "hi_test04" test4
+  _ <- Lo.compileProgram "hi_test12" $ Hi.compileProgram test_12
   pure ()

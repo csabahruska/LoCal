@@ -246,7 +246,7 @@ data Exp where
 
   FunAppNew : {fun_ews : _} -> {res : _} -> {r_res : _} -> {loc_res : Loc r_res} ->
            String ->
-           (fun_def : Arg exps_in -> Exp res loc_res EW fun_ews) ->
+           (fun_def  : Arg exps_in  -> Exp res loc_res EW fun_ews) ->
            (fun_args : Arg exps_in) -> Exp res loc_res EW fun_ews
 
   -- indirection, within same region
@@ -294,8 +294,6 @@ data Exp where
 
 
   -- end-witnesses
-
-  -- TODO: rename to StaticEW
   StaticEW : {ew_in : _} -> {auto _ : Just size = getStaticSize t} -> Exp t loc ew_in [] -> Exp t loc EW []
 
   GenEW : Exp t loc ew_in [] -> Exp t loc EW []

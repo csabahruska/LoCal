@@ -240,8 +240,11 @@ writeExp (MkBox a) = pure $ MkBox !(writeExp a)
   TODO: consume args
 
   FunAppNew : String -> (fun_def  : Arg exps_in  -> Exp res) -> (fun_args : Arg exps_in) -> Exp res
+
+  FunAppNew : {fun_ews : _} -> {res : _} -> {r_res : _} -> {loc_res : Loc r_res} ->
+           String -> (fun_def : Arg exps_in -> Exp res loc_res EW fun_ews) -> (fun_args : Arg exps_in) -> Exp res loc_res EW fun_ews
 -}
-writeExp (FunAppNew name def args) = pure Var -- TODO
+writeExp (FunAppNew name def args) = assert_total $ idris_crash "writeExp - FunAppNew"
 
 writeExp (CasePair {a, b} tup cont) = do
   fst <- newId
@@ -553,6 +556,22 @@ fixHolesWrite (GenEW a) = do
   pure $ GenEW a_lo
 -}
 
+fixHolesWrite (Var{}) = assert_total $ idris_crash "fixHolesWrite - Var"
+{-
+fixHolesWrite (LetRegion{}) = assert_total $ idris_crash "fixHolesWrite - LetRegion"
+fixHolesWrite (GetSnd{}) = assert_total $ idris_crash "fixHolesWrite - GetSnd"
+fixHolesWrite (GetEWS{}) = assert_total $ idris_crash "fixHolesWrite - GetEWS"
+fixHolesWrite (FunAppNew{}) = assert_total $ idris_crash "fixHolesWrite - FunAppNew"
+fixHolesWrite (MkOffset{}) = assert_total $ idris_crash "fixHolesWrite - MkOffset"
+fixHolesWrite (DeRefOffset{}) = assert_total $ idris_crash "fixHolesWrite - DeRefOffset"
+fixHolesWrite (MkPtr{}) = assert_total $ idris_crash "fixHolesWrite - MkPtr"
+fixHolesWrite (DeRefPtr{}) = assert_total $ idris_crash "fixHolesWrite - DeRefPtr"
+fixHolesWrite (StaticEW{}) = assert_total $ idris_crash "fixHolesWrite - StaticEW"
+fixHolesWrite (GenEW{}) = assert_total $ idris_crash "fixHolesWrite - GenEW"
+fixHolesWrite (LeftEW{}) = assert_total $ idris_crash "fixHolesWrite - LeftEW"
+fixHolesWrite (RightEW{}) = assert_total $ idris_crash "fixHolesWrite - RightEW"
+fixHolesWrite (PairEW{}) = assert_total $ idris_crash "fixHolesWrite - PairEW"
+-}
 fixHolesWrite e = assert_total $ idris_crash "fixHolesWrite - TODO"
 
 {-

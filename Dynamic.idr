@@ -103,6 +103,10 @@ emptyCG = MkCG
   , local       = emptyCGLocal
   }
 
+debug : M () -> M ()
+--debug a = a
+debug _ = pure ()
+
 -- actions
 
 addWriteAction : Loc r -> M () -> M ()
@@ -270,8 +274,8 @@ getWrittenCursor loc action = do
 -- TODO: check that it is written only once ; use an effect map for LocVals
 -- TODO: make this continuation based, which can pospone action until the location could be generated, i.e. end-witness is added
 -- DESIGN: allocations must not block, but writes can be postponed, but not allocations
---          this mean that fillDyn always progress, and it creates cursors, bit not necessary writes the content
---         in case of reads the cursos allocation must progress also, because the EDSL API guarantees ???? IDK, what does it guarantees?
+--         this mean that fillDyn always progress, and it creates cursors, but not necessary writes the content
+--         in case of reads the cursor allocation must progress also, because the EDSL API guarantees ???? IDK, what does it guarantee?
 allocCursor : (loc : Loc r) -> M String
 allocCursor loc = markAlloc loc $ case lookup (show loc) !(gets (.local.preallocs)) of
   Just c  => addCur c loc >> pure c
@@ -282,7 +286,7 @@ allocCursor loc = markAlloc loc $ case lookup (show loc) !(gets (.local.prealloc
           print $ colored BrightRed " !! add cursor \{c} :=\n \{loc}\n\n"
           print $ colored BrightMagenta " !! static index \{c} := \{show (getStaticIndex loc)}\n\n"
           addCur c loc
-          emit "/* \{c} = \{loc} */"
+          debug $ emit "/* \{c} = \{loc} */"
           pure c
     case loc of
       LocStart _ _ => do
@@ -406,7 +410,7 @@ fillDyn (MkPtr {loc_in} v) = do
   addStaticSizeEndWitness loc "MkPtr"
   -- HINT: it is required that the target to be written, it will make the dereferenced value valid
   getWrittenCursor loc_in $ \cur_in => do
-    markWrite loc $ emit "*(char**) \{cur} = \{cur_in};"
+    markWrite loc $ emit "*(char**) \{cur} = \{cur_in}; // MkPtr"
 
 fillDyn (MkOffset {loc_in} v) = do
   putStrLn " ++ MkOffset"
@@ -415,11 +419,10 @@ fillDyn (MkOffset {loc_in} v) = do
   addStaticSizeEndWitness loc "MkOffset"
   -- HINT: it is required that the target to be written, it will make the dereferenced value valid
   getWrittenCursor loc_in $ \cur_in => do
-    markWrite loc $ emit "*(int*) \{cur} = \{cur_in} - \{cur};"
+    markWrite loc $ emit "*(int*) \{cur} = \{cur_in} - \{cur}; // MkOffset"
 
 {-
-  TODO:
-    - add assertions when alloc and actions were not run in the end of codegen
+  done - add assertions when alloc and actions were not run in the end of codegen
 -}
 
 fillDyn (MkLeft arg) = do
@@ -466,7 +469,7 @@ fillDyn (I64Op2 op {loc_in1, loc_in2} arg1 arg2) = do
   addStaticSizeEndWitness loc "I64Op2 - result"
   getWrittenCursor loc_in1 $ \cur_in1 => do
     getWrittenCursor loc_in2 $ \cur_in2 => do
-      markWrite loc $ emit "*(int*) \{cur} = *(int*) \{cur_in1} \{op} *(int*) \{cur_in2};"
+      markWrite loc $ emit "*(int*) \{cur} = *(int*) \{cur_in1} \{op} *(int*) \{cur_in2}; // I64Op2"
 
 fillDyn (I64Cmp op {loc_in1, loc_in2} arg1 arg2) = do
   putStrLn " ++ I64Cmp"
@@ -487,50 +490,6 @@ fillDyn (I64CmpC op argC1 {loc_in2} arg2) = do
     markWrite loc $ emit "*(char*) \{cur} = (\{argC1} \{op} *(int*) \{cur_in2}) ? 1 /*RIGHT_TAG*/ : 0 /*LEFT_TAG*/;"
 -}
 
-fillDyn (NewCaseEither {a, b, loc_scrut} scrut cont_left cont_right) = do
-  lift $ putStrLn " ++ CaseEither"
-  readDyn scrut
-  getWrittenCursor loc_scrut $ \cur_tag => do
-    let locL = LocAfterTag "Left"  a loc_scrut
-        locR = LocAfterTag "Right" b loc_scrut
-
-    let cur_end_tmp     = "\{!(newCursorName)}_end_tmp"
-        cur_tag_end_tmp = "\{cur_tag}_end_tmp"
-    emit "char* \{cur_end_tmp} = 0; // uninitalized"
-    emit "char* \{cur_tag_end_tmp} = 0; // uninitalized"
-
-    let writeScrutEW = do
-          Just ew <- lookupEndWitness loc_scrut
-            | Nothing => pure False
-          emit "\{cur_tag_end_tmp} = \{ew};"
-          pure True
-
-    emit "if (*(char*) \{cur_tag} == 0) { // LEFT"
-    (scrut_ew_left, left_cglocal) <- indent $ localScope $ do
-      _ <- markAlreadyWritten locL $ allocCursor locL
-      let expL = cont_left Var
-      fillDyn expL
-      emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expL)};"
-      pure (!writeScrutEW, !(gets (.local)))
-
-    emit "} else { // RIGHT"
-    (scrut_ew_right, right_cglocal) <- indent $ localScope $ do
-      _ <- markAlreadyWritten locR $ allocCursor locR
-      let expR = cont_right Var
-      fillDyn expR
-      emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expR)};"
-      pure (!writeScrutEW, !(gets (.local)))
-    emit "}"
-
-    modify { local.read   $= union (intersection left_cglocal.read  right_cglocal.read)
-           , local.write  $= union (intersection left_cglocal.write right_cglocal.write)
-           }
-    defineEndWitness loc cur_end_tmp
-    -- add end-witness for loc_scrut ; this can be done when both left and right eliminator has it
-    when (scrut_ew_left && scrut_ew_right) $ do
-      defineEndWitness loc_scrut cur_tag_end_tmp
-
-
 fillDyn (Copy {loc_in} v) = do
   putStrLn " ++ Copy"
   readDyn v
@@ -538,7 +497,7 @@ fillDyn (Copy {loc_in} v) = do
   getWrittenCursor loc_in $ \cur_src => do
     cur_src_end <- getEndWitness loc_in
     defineEndWitness loc "\{cur_dst} + (\{cur_src_end} - \{cur_src})"
-    markWrite loc $ emit "memcpy(\{cur_dst}, \{cur_src}, \{cur_src_end} - \{cur_src});"
+    markWrite loc $ emit "memcpy(\{cur_dst}, \{cur_src}, \{cur_src_end} - \{cur_src}); // Copy"
 
 -- TODO: input end-witness passing and return
 fillDyn (FunAppNew {fun_ews, loc_res} fun_name fun args) = do
@@ -581,8 +540,8 @@ fillDyn (FunAppNew {fun_ews, loc_res} fun_name fun args) = do
       emitDecl "char* \{fun_name}(\{paramDecls}, char* \{cur_out});"
       emit "char* \{fun_name}(\{paramDecls}, char* \{cur_out}) {"
       indent $ do
-        for_ paramDocs emit
-        emit "/* \{cur_out} = \{loc_res} */"
+        debug $ for_ paramDocs emit
+        debug $ emit "/* \{cur_out} = \{loc_res} */"
         fillDyn $ fun $ toParams args
         emit "return \{!(getEndWitness loc_res)};"
       emit "}"
@@ -593,14 +552,15 @@ fillDyn e@(PrintI64{}) = evalCont e FillDyn
 fillDyn e@(PrintValue{}) = evalCont e FillDyn
 fillDyn e@(DeRefOffset{}) = evalCont e FillDyn
 fillDyn e@(DeRefPtr{}) = evalCont e FillDyn
+fillDyn e@(NewCaseEither{}) = evalCont e FillDyn
 
 fillDyn (LetTick _ v) = fillDyn v
 
-fillDyn (NewCaseEither{}) = assert_total $ idris_crash $ "fillDyn - NewCaseEither"
 
 fillDyn (AddEW{}) = assert_total $ idris_crash $ "fillDyn - AddEW"
 fillDyn (GetEWS{}) = assert_total $ idris_crash $ "fillDyn - GetEWS"
-fillDyn (Var{}) = ensureWritten loc -- this is needed for NewFunApp result, is this ok?? assert_total $ idris_crash $ "fillDyn - Var"
+--fillDyn (Var{}) = ensureWritten loc -- this is needed for NewFunApp result, is this ok?? 
+fillDyn (Var{}) = assert_total $ idris_crash $ "fillDyn - Var"
 fillDyn (GetFst{}) = assert_total $ idris_crash $ "fillDyn - GetFst"
 fillDyn (GetSnd{}) = assert_total $ idris_crash $ "fillDyn - GetSnd"
 fillDyn (StaticEW{}) = assert_total $ idris_crash $ "fillDyn - StaticEW"
@@ -609,8 +569,7 @@ fillDyn (PairEW{}) = assert_total $ idris_crash $ "fillDyn - PairEW"
 fillDyn (LeftEW{}) = assert_total $ idris_crash $ "fillDyn - LeftEW"
 fillDyn (RightEW{}) = assert_total $ idris_crash $ "fillDyn - RightEW"
 {-
-  TODO:
-  - clarify the relation and semantics between fillDyn and evalEff
+  done - clarify the relation and semantics between fillDyn and readDyn
 -}
 
 -----------------
@@ -647,7 +606,7 @@ evalCont (DeRefOffset {x, r_in, loc_in} v cont) mode = do
     cur <- newCursorName
     let r_val = MkRegion !newId
         loc_val = LocStart x r_val
-    emit "/* \{cur} = \{loc_val} */"
+    debug $ emit "/* \{cur} = \{loc_val} */"
     markAlloc loc_val $ do
       addCur cur loc_val
       emit "char* \{cur} = \{cur_in} + *(int*)\{cur_in}; // DeRefOffset"
@@ -662,12 +621,55 @@ evalCont (DeRefPtr {x, r_in, loc_in} v cont) mode = do
     cur <- newCursorName
     let r_val = MkRegion !newId
         loc_val = LocStart x r_val
-    emit "/* \{cur} = \{loc_val} */"
+    debug $ emit "/* \{cur} = \{loc_val} */"
     markAlloc loc_val $ do
       addCur cur loc_val
       emit "char* \{cur} = *(char**)\{cur_in}; // DeRefPtr"
     markWrite loc_val $ pure ()
     evalCGMode mode (cont {r_val} Var)
+
+evalCont (NewCaseEither {a, b, loc_scrut} scrut cont_left cont_right) mode = do
+  lift $ putStrLn " ++ CaseEither"
+  readDyn scrut
+  getWrittenCursor loc_scrut $ \cur_tag => do
+    let locL = LocAfterTag "Left"  a loc_scrut
+        locR = LocAfterTag "Right" b loc_scrut
+
+    let cur_end_tmp     = "\{!(newCursorName)}_end_tmp"
+        cur_tag_end_tmp = "\{cur_tag}_end_tmp"
+    emit "char* \{cur_end_tmp} = 0; // uninitalized"
+    emit "char* \{cur_tag_end_tmp} = 0; // uninitalized"
+
+    let writeScrutEW = do
+          Just ew <- lookupEndWitness loc_scrut
+            | Nothing => pure False
+          emit "\{cur_tag_end_tmp} = \{ew};"
+          pure True
+
+    emit "if (*(char*) \{cur_tag} == 0) { // LEFT"
+    (scrut_ew_left, left_cglocal) <- indent $ localScope $ do
+      _ <- markAlreadyWritten locL $ allocCursor locL
+      let expL = cont_left Var
+      evalCGMode mode expL
+      emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expL)};"
+      pure (!writeScrutEW, !(gets (.local)))
+
+    emit "} else { // RIGHT"
+    (scrut_ew_right, right_cglocal) <- indent $ localScope $ do
+      _ <- markAlreadyWritten locR $ allocCursor locR
+      let expR = cont_right Var
+      evalCGMode mode expR
+      emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expR)};"
+      pure (!writeScrutEW, !(gets (.local)))
+    emit "}"
+
+    modify { local.read   $= union (intersection left_cglocal.read  right_cglocal.read)
+           , local.write  $= union (intersection left_cglocal.write right_cglocal.write)
+           }
+    defineEndWitness loc cur_end_tmp
+    -- add end-witness for loc_scrut ; this can be done when both left and right eliminator has it
+    when (scrut_ew_left && scrut_ew_right) $ do
+      defineEndWitness loc_scrut cur_tag_end_tmp
 
 evalCont _ _ = assert_total $ idris_crash $ "evalCont TODO"
 -----------------
@@ -702,7 +704,7 @@ readDyn (InheritEW v) = do
   MkRight         wdone rdone   rsem = ensure written
   GetFst                rdone
   GetSnd                rdone
-  NewCaseEither   wdone TODO                            cont
+  NewCaseEither   wdone rdone                           cont
   AddEW           TODO  ??
   FunAppNew       wdone rdone   rsem = traverse         cont
   MkOffset        wdone rdone   rsem = ensure written
@@ -747,6 +749,7 @@ readDyn e@(PrintI64{}) = evalCont e ReadDyn
 readDyn e@(PrintValue{}) = evalCont e ReadDyn
 readDyn e@(DeRefOffset{}) = evalCont e ReadDyn
 readDyn e@(DeRefPtr{}) = evalCont e ReadDyn
+readDyn e@(NewCaseEither{}) = evalCont e ReadDyn
 
 readDyn (GetFst {a, loc_tup} tup) = do
   readDyn tup
@@ -768,7 +771,6 @@ readDyn (AddEW{}) = assert_total $ idris_crash $ "readDyn - AddEW"
 readDyn (GenEW{}) = assert_total $ idris_crash $ "readDyn - GenEW"
 readDyn (GetEWS{}) = assert_total $ idris_crash $ "readDyn - GetEWS"
 readDyn (LeftEW{}) = assert_total $ idris_crash $ "readDyn - LeftEW"
-readDyn (NewCaseEither{}) = assert_total $ idris_crash $ "readDyn - NewCaseEither"
 readDyn (PairEW{}) = assert_total $ idris_crash $ "readDyn - PairEW"
 readDyn (RightEW{}) = assert_total $ idris_crash $ "readDyn - RightEW"
 

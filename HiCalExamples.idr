@@ -11,9 +11,11 @@ EqI64C, LtI64C : Int -> Exp I64 -> Exp (Either T0 T0)
 EqI64C i = I64Cmp EQ (MkI64 i)
 LtI64C i = I64Cmp LT (MkI64 i)
 
+public export
 Rev_my_ty : Ty
 Rev_my_ty = Either (Pair (Box "Rev_my_ty" Rev_my_ty) I64) T0
 
+public export
 test_12 : Program
 test_12 =
   let genList : Arg [Exp I64] -> Exp Rev_my_ty
