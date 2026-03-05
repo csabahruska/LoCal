@@ -50,6 +50,12 @@ getStaticSize = \case
       else Nothing
   Box _ _ => Nothing
 
+public export
+isStaticSize : Ty -> Bool
+isStaticSize t = case getStaticSize t of
+  Nothing => False
+  Just{}  => True
+
 {-
   INSIGHT:
     control flow construct data
@@ -179,8 +185,8 @@ data Exp where
   Copy : {r_in : _} -> {loc_in : Loc r_in} -> Exp t loc_in EW [] -> Exp t loc EW []
 
   -- boxing
-  MkBox : {t : _} -> {n : String} -> Exp t loc ew [] -> Exp (Box n t) loc ew []
-  UnBox : {t : _} -> {n : String} -> Exp (Box n t) loc ew [] -> Exp t loc ew []
+  MkBox : {t : Ty} -> {n : String} -> Exp t loc ew [] -> Exp (Box n $ Delay t) loc ew []
+  UnBox : {t : Ty} -> {n : String} -> Exp (Box n $ Delay t) loc ew [] -> Exp t loc ew []
 
   -- value shapes, ADT can be modeled with these
 
@@ -265,9 +271,9 @@ data Exp where
   Var : Exp t loc ew sew
 
   -- end-witnesses
-  StaticEW : {ew_in : _} -> {auto _ : Just size = getStaticSize t} -> Exp t loc ew_in [] -> Exp t loc EW []
+  StaticEW : {ew_in : _} -> {auto prf : True = isStaticSize t} -> Exp t loc ew_in [] -> Exp t loc EW []
 
-  GenEW : {ew_in : _} -> Exp t loc ew_in [] -> Exp t loc EW []
+  GenEW : {t : _} -> {r : _} -> {loc : Loc r} -> {ew_in : _} -> Exp t loc ew_in [] -> Exp t loc EW []
 
   PairEW : {r_tup : _} -> {a, b : Ty} -> {loc_tup : Loc r_tup} -> {ew_tup : _} ->
            Exp (Pair a b) loc_tup ew_tup [] ->

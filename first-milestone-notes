@@ -4,6 +4,22 @@ PROBLEM: end witness availability is not tracked by the type system, neither the
 TODO/FUTURE WORK: extend the type system to track these too
 
 TODO:
+  frontend:
+    - linear region inference for lets
+    - think through hole fixing machinery ; and hole introduction and region refreshing during hole filling
+  backend:
+    - handle fun arg end witness passing
+    - design where to handle GenEW a) backend b) hical to local conversion
+
+  - try out bitpacking??
+    PROBLEMS:
+      - we would need alignment control
+        IDEA:
+          + aligned region buffer start
+          + field cursor would automatically adjusted according to the alignment constraint (this is runtime)
+          Q: can we do this statically? how?
+
+TODO:
   - CANCEL: port examples to CPS
   - CANCEL: add linear arrows
   done - port everything back to direct value based IR, it is ok because (CPS style) MkStaticEW solves the end-witness effect problem

@@ -39,7 +39,6 @@ record LocState where
   hiExps    : SortedMap Int HiExp
   loExps    : SortedMap Int LoExp
   holes     : SortedMap Int Int -- rid -> hi.var i
-  
   funs      : SortedSet String
 
 emptyLocState : LocState
@@ -187,7 +186,7 @@ readExp (Var i) = lookupLoExp i >>= \case
           CaseEither  - has location
           Let - gets location at the first encounter
     -}
-    -- TODO: create only one hole
+    -- TODO: create only one hole ; Q: would it work if we'd use the Hi.Var id as region-id for hole?
     rid <- newId
     addHole rid i -- region-id => Hi.Var id
     traceM "new hole \{rid} => Hi.Var id: \{i} type: \{show t}"
