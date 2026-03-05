@@ -21,7 +21,7 @@ test_12 =
   let genList : Arg [Exp I64] -> Exp Rev_my_ty
       genList (ArgN i Arg0) =
         CaseEither (EqI64C 10 i)
-          (\f => MkLeft $ MkPair (MkBox $ FunAppNew "genList" genList (ArgN (AddI64C 1 i) Arg0)) i)
+          (\f => MkLeft $ MkPair (MkBox $ FunAppDef "genList" genList (ArgN (AddI64C 1 i) Arg0)) i)
           (\t => MkRight MkT0)
 
       printList : Arg [Exp Rev_my_ty] -> Exp T0
@@ -30,12 +30,12 @@ test_12 =
           (\l =>
               CasePair l $ \lst, i =>
               PrintI64 i $ \_ =>
-              FunAppNew "printList" printList (ArgN (UnBox lst) Arg0)
+              FunAppDef "printList" printList (ArgN (UnBox lst) Arg0)
           )
           (\r => MkT0)
 
   in Main $
       let i = MkI64 1 in
-      Let (FunAppNew "genList" genList (ArgN i Arg0)) $ \l =>
+      Let (FunAppDef "genList" genList (ArgN i Arg0)) $ \l =>
       PrintValue l $ \_ =>
-      FunAppNew "printList" printList (ArgN l Arg0)
+      FunAppDef "printList" printList (ArgN l Arg0)
