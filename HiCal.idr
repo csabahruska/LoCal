@@ -49,10 +49,7 @@ data Exp where
   CasePair   : {a, b, c : Ty} -> Exp (Pair a b) -> (Exp a -> Exp b -> Exp c) -> Exp c
   CaseEither : {a, b, c : Ty} -> Exp (Either a b) -> (Exp a -> Exp c) -> (Exp b -> Exp c) -> Exp c
 
-  FunAppNew :
-           String ->
-           (fun_def  : Arg exps_in  -> Exp res) ->
-           (fun_args : Arg exps_in) -> Exp res
+  FunAppDef : String -> (Arg exps_in -> Exp res) -> Arg exps_in -> Exp res
 
   -- primitive values
   MkT0  : Exp T0
