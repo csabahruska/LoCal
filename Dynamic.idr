@@ -69,6 +69,7 @@ record CGLocal where
   locations     : SortedMap String String
   endwitness    : SortedMap String String
   writeActions  : SortedMap String $ List $ M ()
+  genFunActions : List $ M ()
   funName       : String
   indentLevel   : Nat
   -- assertions
@@ -89,6 +90,7 @@ emptyCGLocal = MkCGLocal
   , locations     = empty
   , endwitness    = empty
   , writeActions  = empty
+  , genFunActions = []
   , funName       = ""
   , indentLevel   = 0
   , read          = empty
@@ -130,6 +132,12 @@ assertNoActionsLeft = do
   wActs <- gets (.local.writeActions)
   unless (null wActs) $ do
     assert_total $ idris_crash $ "pending write actions for: \{unlines (keys wActs)}"
+
+listPendingActions : M ()
+listPendingActions = do
+  wActs <- gets (.local.writeActions)
+  unless (null wActs) $ do
+    putStrLn $ "pending write actions for: \{unlines (keys wActs)}"
 
 assertRead : Loc r -> M ()
 assertRead loc = do
@@ -214,6 +222,9 @@ emitDecl s = do
   putStrLn "[\{cg.local.funName}] \{s}"
   modify {decls $= (::) s}
 
+runAfterGenFunction : M () -> M ()
+runAfterGenFunction act = modify {local.genFunActions $= (::) act}
+
 genFunction : String -> M a -> M a
 genFunction fun_name action = do
   l <- gets (.local)
@@ -221,6 +232,9 @@ genFunction fun_name action = do
   modify {local.funName := fun_name}
   modify {code $= insert fun_name []}
   result <- action
+  -- run post gen fun actions
+  gets (.local.genFunActions) >>= sequence_
+
   modify {local := l}
   pure result
 
@@ -339,7 +353,7 @@ addStaticSizeEndWitness : (loc : Loc r) -> String -> M ()
 addStaticSizeEndWitness l msg = do
   let t = getLocTy l
       Just bytes = getStaticSize t
-        | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing static size for: \{l}"
+        | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: \{msg} missing static size for: \{l}"
   unless !(hasEndWitness l) $ do
     cur <- getCursor l
     let ew = "\{cur}_end"
@@ -499,37 +513,46 @@ fillDyn (Copy {loc_in} v) = do
     defineEndWitness loc "\{cur_dst} + (\{cur_src_end} - \{cur_src})"
     markWrite loc $ emit "memcpy(\{cur_dst}, \{cur_src}, \{cur_src_end} - \{cur_src}); // Copy"
 
--- TODO: input end-witness passing and return
-fillDyn (FunAppNew {fun_ews, loc_res} fun_name fun args) = do
-  putStrLn " ++ FunAppNew \{fun_name}"
+fillDyn (FunApp {fun_ews, loc_res} fun_name args) = do
+  putStrLn " ++ FunApp \{fun_name}"
   let readArgs : Arg _ -> M ()
       readArgs (Arg0) = pure ()
       readArgs (ArgN e a) = readDyn e >> readArgs a
   readArgs args
   -- TODO: handle returning ews
-  unless (null fun_ews) $ assert_total $ idris_crash $ "TODO - handle FunAppNew fun_ews"
-
+  unless (null fun_ews) $ assert_total $ idris_crash $ "TODO - handle FunApp fun_ews"
   cur_out <- allocCursor loc_res
   let buildCall : List String -> Arg _ -> M ()
       buildCall curs (ArgN {loc=loc_arg} _ a) = getWrittenCursor loc_arg $ \cur_in => buildCall (cur_in :: curs) a
       buildCall curs Arg0 = markWrite loc_res $ defineEndWitness loc_res "\{fun_name}(\{joinBy ", " $ reverse curs}, \{cur_out})"
   buildCall [] args
 
-  -- codegen function if needed
-  when !(isNewFunction fun_name) $ do
+-- TODO: input end-witness passing and return
+fillDyn (FunAppDef {res, fun_ews, loc_res} fun_name fun args) = do
+  putStrLn " ++ FunAppDef \{fun_name}"
+  -- 1. gen function call
+  fillDyn $ FunApp {res, fun_ews, loc_res} fun_name args
+  runAfterGenFunction $ when !(isNewFunction fun_name) $ do
+    -- 2. codegen function if needed
     genFunction fun_name $ do
       -- TODO: pass arg's pointers entry if any -- what is this???
       cur_out <- newCursorName
       preallocCursor cur_out loc_res
 
-      let buildParams : List String -> List String -> Arg _ -> M (List String, List String)
-          buildParams params paramDocs Arg0 = pure (params, paramDocs)
-          buildParams params paramDocs (ArgN {loc=loc_arg} _ a) = do
+      let buildParams : M () -> List String -> List String -> Arg _ -> M (M (), List String, List String)
+          buildParams act params paramDocs Arg0 = pure (act, params, paramDocs)
+          buildParams act params paramDocs (ArgN {loc=loc_arg} e a) = do
             cur_arg <- newCursorName
             markAlreadyWritten loc_arg $ markAlloc loc_arg $ addCur cur_arg loc_arg
-            buildParams ("char* \{cur_arg}" :: params) ("/* \{cur_arg} = \{loc_arg} */" :: paramDocs) a
 
-      (params, paramDocs) <- buildParams [] [] args
+            putStrLn " ++ FunAppDef \{fun_name} - arg - add end-witness \{loc_arg}"
+            -- TODO: design proper arg end-witness handling
+            let act2 = when (isJust $ getStaticSize $ getTy e) $ do
+                        addStaticSizeEndWitness loc_arg "FunAppDef - arg"
+
+            buildParams (act >> act2) ("char* \{cur_arg}" :: params) ("/* \{cur_arg} = \{loc_arg} */" :: paramDocs) a
+
+      (act, params, paramDocs) <- buildParams (pure ()) [] [] args
 
       let toParams : Arg a -> Arg a
           toParams Arg0 = Arg0
@@ -542,7 +565,9 @@ fillDyn (FunAppNew {fun_ews, loc_res} fun_name fun args) = do
       indent $ do
         debug $ for_ paramDocs emit
         debug $ emit "/* \{cur_out} = \{loc_res} */"
-        fillDyn $ fun $ toParams args
+        act -- TODO: design proper arg end-witness handling
+        fillDyn {loc=loc_res} $ fun $ toParams args
+        assertNoActionsLeft
         emit "return \{!(getEndWitness loc_res)};"
       emit "}"
 
@@ -552,10 +577,7 @@ fillDyn e@(PrintI64{}) = evalCont e FillDyn
 fillDyn e@(PrintValue{}) = evalCont e FillDyn
 fillDyn e@(DeRefOffset{}) = evalCont e FillDyn
 fillDyn e@(DeRefPtr{}) = evalCont e FillDyn
-fillDyn e@(NewCaseEither{}) = evalCont e FillDyn
-
-fillDyn (LetTick _ v) = fillDyn v
-
+fillDyn e@(CaseEither{}) = evalCont e FillDyn
 
 fillDyn (AddEW{}) = assert_total $ idris_crash $ "fillDyn - AddEW"
 fillDyn (GetEWS{}) = assert_total $ idris_crash $ "fillDyn - GetEWS"
@@ -573,8 +595,8 @@ fillDyn (RightEW{}) = assert_total $ idris_crash $ "fillDyn - RightEW"
 -}
 
 -----------------
-evalCont (LetRegionValue _ v cont) mode = do
-  putStrLn " ++ LetRegionValue"
+evalCont (LetRegionValue r v cont) mode = do
+  putStrLn " ++ LetRegionValue \{show r}"
   fillDyn v
   evalCGMode mode (cont Var)
 
@@ -628,8 +650,8 @@ evalCont (DeRefPtr {x, r_in, loc_in} v cont) mode = do
     markWrite loc_val $ pure ()
     evalCGMode mode (cont {r_val} Var)
 
-evalCont (NewCaseEither {a, b, loc_scrut} scrut cont_left cont_right) mode = do
-  lift $ putStrLn " ++ CaseEither"
+evalCont (CaseEither {a, b, loc_scrut} scrut cont_left cont_right) mode = do
+  lift $ putStrLn " ++ CaseEither \{loc_scrut}"
   readDyn scrut
   getWrittenCursor loc_scrut $ \cur_tag => do
     let locL = LocAfterTag "Left"  a loc_scrut
@@ -704,9 +726,9 @@ readDyn (InheritEW v) = do
   MkRight         wdone rdone   rsem = ensure written
   GetFst                rdone
   GetSnd                rdone
-  NewCaseEither   wdone rdone                           cont
+  CaseEither      wdone rdone                           cont
   AddEW           TODO  ??
-  FunAppNew       wdone rdone   rsem = traverse         cont
+  FunAppDef       wdone rdone   rsem = traverse         cont
   MkOffset        wdone rdone   rsem = ensure written
   DeRefOffset     wdone rdone   rsem = traverse         cont
   MkPtr           wdone rdone   rsem = ensure written
@@ -718,7 +740,6 @@ readDyn (InheritEW v) = do
   PrintI64        wdone rdone   rsem = traverse         cont
   PrintValue      wdone rdone   rsem = traverse         cont
   Var                   rdone   rsem = ensure written
-  LetTick         wdone rdone   wsem = rsem = traverse
   StaticEW              rdone
   GenEW                 TODO
   PairEW                TODO
@@ -737,11 +758,11 @@ readDyn (MkLeft{})    = ensureWritten loc
 readDyn (MkPair{})    = ensureWritten loc
 readDyn (Copy{})      = ensureWritten loc
 readDyn (Var{})       = ensureWritten loc
-readDyn (FunAppNew{}) = ensureWritten loc
+readDyn (FunAppDef{}) = ensureWritten loc
+readDyn (FunApp{})    = ensureWritten loc
 
 readDyn (MkBox v) = readDyn v
 readDyn (UnBox v) = readDyn v
-readDyn (LetTick _ v) = readDyn v
 
 readDyn e@(LetRegionValue{}) = evalCont e ReadDyn
 readDyn e@(LetRegion{}) = evalCont e ReadDyn
@@ -749,7 +770,7 @@ readDyn e@(PrintI64{}) = evalCont e ReadDyn
 readDyn e@(PrintValue{}) = evalCont e ReadDyn
 readDyn e@(DeRefOffset{}) = evalCont e ReadDyn
 readDyn e@(DeRefPtr{}) = evalCont e ReadDyn
-readDyn e@(NewCaseEither{}) = evalCont e ReadDyn
+readDyn e@(CaseEither{}) = evalCont e ReadDyn
 
 readDyn (GetFst {a, loc_tup} tup) = do
   readDyn tup
@@ -768,7 +789,12 @@ readDyn (GetSnd {a, b, loc_tup} tup fst) = do
     markAlreadyWritten locSnd $ pure ()
 
 readDyn (AddEW{}) = assert_total $ idris_crash $ "readDyn - AddEW"
-readDyn (GenEW{}) = assert_total $ idris_crash $ "readDyn - GenEW"
+
+readDyn (GenEW a) = do
+  readDyn a
+  --assert_total $ idris_crash $ "readDyn - GenEW type: \{getLocTy loc}"
+  defineEndWitness loc "0 /*GenEW - TODO*/"
+
 readDyn (GetEWS{}) = assert_total $ idris_crash $ "readDyn - GetEWS"
 readDyn (LeftEW{}) = assert_total $ idris_crash $ "readDyn - LeftEW"
 readDyn (PairEW{}) = assert_total $ idris_crash $ "readDyn - PairEW"
