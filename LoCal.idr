@@ -79,18 +79,43 @@ isStaticSize t = case getStaticSize t of
 
 public export
 data Region : Type where
-  MkRegion : Int -> Region
+  MkRegion    : Int -> Region
+  MkArgRegion : String -> Nat -> Region
 
 export
 Injective MkRegion where
   injective Refl = Refl
 
+export
+{x : _} -> Injective (MkArgRegion x) where
+  injective Refl = Refl
+
+export
+{y : _} -> Injective (`MkArgRegion` y) where
+  injective Refl = Refl
+
+export
+Biinjective MkArgRegion where
+  biinjective Refl = (Refl, Refl)
+
+public export
+Uninhabited (MkRegion _ = MkArgRegion _ _) where
+  uninhabited Refl impossible
+
+public export
+Uninhabited (MkArgRegion _ _ = MkRegion _) where
+  uninhabited Refl impossible
+
 public export
 DecEq Region where
   decEq (MkRegion x) (MkRegion y) = decEqCong $ decEq x y
+  decEq (MkArgRegion n1 i1) (MkArgRegion n2 i2) = decEqCong2 (decEq n1 n2) (decEq i1 i2)
+  decEq (MkRegion _) (MkArgRegion _ _) = No absurd
+  decEq (MkArgRegion _ _) (MkRegion _) = No absurd
 
 showRegion : Region -> String
 showRegion (MkRegion i) = "MkRegion \{i}"
+showRegion (MkArgRegion n i) = "MkArgRegion \{n} \{i}"
 
 public export Show Region where show = showRegion
 
@@ -170,9 +195,10 @@ public export
 data Exp : (t : Ty) -> (loc : Loc r) -> (ew : EndWitness) -> (saved_ews : List Type) -> Type
 
 public export
-data Arg : (sig : List Type) -> Type where
-  Arg0 : Arg []
-  ArgN : {t : _} -> {r : _} -> {loc : Loc r} -> {ew : _} -> Exp t loc ew [] -> Arg s -> Arg (Exp t loc ew [] :: s)
+data Arg : {fun : String} -> {n : Nat} -> (sig : List Type) -> Type where
+  Arg0 : {fun : _} -> Arg {fun} {n=0} []
+  ArgN : {fun : _} -> {n : _} -> {t : _} -> {r_arg : _} -> {loc_arg : Loc r_arg} -> {ew : _} -> Exp t loc_arg ew [] -> Arg {fun} {n} s ->
+         Arg {fun} {n=S n} (Exp t (LocStart t $ MkArgRegion fun n) ew [] :: s)
 
 data Exp where
 
@@ -229,9 +255,9 @@ data Exp where
   GetEWS : Exp _ _ _ fun_ews -> (Arg fun_ews -> Exp c loc ew ews) -> Exp c loc ew ews
 
   FunAppDef : {fun_ews : _} -> {res : _} -> {r_res : _} -> {loc_res : Loc r_res} ->
-           String ->
-           (fun_def  : Arg exps_in  -> Exp res loc_res EW fun_ews) ->
-           (fun_args : Arg exps_in) -> Exp res loc_res EW fun_ews
+           (fun : String) ->
+           (fun_def  : Arg {fun} {n} exps_in  -> Exp res loc_res EW fun_ews) ->
+           (fun_args : Arg {fun} {n} exps_in) -> Exp res loc_res EW fun_ews
 
   FunApp : {fun_ews : _} -> {res : _} -> {r_res : _} -> {loc_res : Loc r_res} ->
            String ->
@@ -294,3 +320,32 @@ data Exp where
 public export
 data Program : Type where
   Main  : {res : Ty} -> Exp res (LocStart res (MkRegion (-1))) EW [] -> Program
+
+public export
+showLoExpTag : Exp t loc ew ews -> String
+showLoExpTag = \case
+  LetRegion{} => "LetRegion"
+  AddEW{}     => "AddEW"
+  GetEWS{}    => "GetEWS"
+  LetRegionValue{} => "LetRegionValue"
+  Copy{}      => "Copy"
+  MkBox{}     => "MkBox"
+  UnBox{}     => "UnBox"
+  MkPair{}    => "MkPair"
+  MkLeft{}    => "MkLeft"
+  MkRight{}   => "MkRight"
+  GetFst{}    => "GetFst"
+  GetSnd{}    => "GetSnd"
+  CaseEither{} => "CaseEither"
+  FunAppDef{} => "FunAppDef"
+  FunApp{}    => "FunApp"
+  MkT0{}      => "MkT0"
+  MkI64{}     => "MkI64"
+  I64Op2{}    => "I64Op2"
+  I64Cmp{}    => "I64Cmp"
+  PrintI64{}  => "PrintI64"
+  PrintValue{}  => "PrintValue"
+  Var{}       => "Var"
+  StaticEW{}  => "StaticEW"
+  GenEW{}     => "GenEW"
+  _ => assert_total $ idris_crash "showLoExpTag - TODO"
