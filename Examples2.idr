@@ -69,8 +69,8 @@ AddI64C i e = LetRegion $ \r => LetRegionValue r (MkI64 i) $ \i => I64Op2 Plus i
 
 public export
 EqI64C, LtI64C : Int -> {r1 : _} -> {ew1 : _} -> {loc_in1 : Loc r1} -> Exp I64 loc_in1 ew1 [] -> Exp (Either T0 T0) loc EW []
-EqI64C i e = LetRegion $ \r => LetRegionValue r (MkI64 i) $ \i => I64Cmp EQ i e
-LtI64C i e = LetRegion $ \r => LetRegionValue r (MkI64 i) $ \i => I64Cmp LT i e
+EqI64C i e = LetRegion $ \r => LetRegionValue r (MkI64 i) $ \i => I64Cmp EQ e i
+LtI64C i e = LetRegion $ \r => LetRegionValue r (MkI64 i) $ \i => I64Cmp LT e i
 
 -------------------------------------------
 -- Boxing experiment --------------
@@ -439,158 +439,193 @@ test_11 =
       FunApp "printList" (printList 2) l $ \l =>
       l
 -}
+covering
+mapSuccList_rev : {ew : _} -> {r_out : _} -> {loc_out : Loc r_out} ->
+              Arg [Exp Rev_my_ty loc_in ew []] -> Exp Rev_my_ty loc_out EW []
+mapSuccList_rev (ArgN a Arg0) =
+  CaseEither a
+    (\l =>
+        let ofs = GetFst l in
+        let lst = GetFst $ GetSnd l $ StaticEW ofs in
+        DeRefOffset ofs $ \i =>
+
+        let res = FunAppDef "mapSuccList_rev" mapSuccList_rev (ArgN (UnBox lst) Arg0) in
+        MkLeft $ let j = AddI64C 1 i in MkPair (MkOffset j) $ MkPair (MkBox res) j
+        -- TODO: return input end-witness
+    )
+    --(\r => MkRight $ Copy $ StaticEW r)
+    (\r => MkRight MkT0)
+
+mapSuccList_rev_bug : {ew : _} -> {r_out : _} -> {loc_out : Loc r_out} ->
+              Arg [Exp Rev_my_ty loc_in ew []] -> Exp Rev_my_ty loc_out EW []
+mapSuccList_rev_bug (ArgN a Arg0) =
+  CaseEither a
+    (\l =>
+        let ofs = GetFst l in
+        let lst = GetFst $ GetSnd l $ StaticEW ofs in
+        DeRefOffset ofs $ \i => -- shadowing
+        -- Q: why does not compile?
+        -- Q: what is the meaning?
+        -- Q: is it correct at all?
+
+        let res = FunAppDef "mapSuccList_rev_bug" mapSuccList_rev_bug (ArgN (UnBox lst) Arg0) in
+        MkLeft $ let i = AddI64C 1 i in MkPair (MkOffset i) $ MkPair (MkBox res) i
+        -- TODO: return input end-witness
+    )
+    --(\r => MkRight $ Copy $ StaticEW r)
+    (\r => MkRight MkT0)
+
+genList_rev : {r_out : _} -> {loc_out : Loc r_out} -> Arg [Exp I64 loc_in EW []] -> Exp Rev_my_ty loc_out EW []
+genList_rev (ArgN i Arg0) =
+  LetRegion $ \r =>
+  LetRegionValue r (EqI64C 10 i) $ \b =>
+  CaseEither b
+    (\f =>
+        LetRegion $ \r =>
+        LetRegionValue r (AddI64C 1 i) $ \next =>
+        -- working
+        let res = FunAppDef "genList_rev" genList_rev (ArgN next Arg0) in
+        --FunApp "genList_rev" genList_rev next $ \res =>
+        MkLeft $ let j = Copy $ StaticEW i in MkPair (MkOffset j) $ MkPair (MkBox res) j
+    )
+    (\t => MkRight MkT0)
+
+printList_rev : {ew : _} -> {r_out : _} -> {loc_out : Loc r_out} -> Arg [Exp Rev_my_ty loc_in ew []] -> Exp T0 loc_out EW []
+printList_rev (ArgN a Arg0) =
+  CaseEither a
+    (\l =>
+        let ofs = GetFst l in
+        let lst = GetFst $ GetSnd l $ StaticEW ofs in
+        DeRefOffset ofs $ \i =>
+        PrintI64 i $ \_ =>
+        FunAppDef "printList_rev" printList_rev (ArgN (UnBox lst) Arg0)
+    )
+    (\r => MkT0)
+
+filterLt5List_rev : {ew : _} -> {r_out : _} -> {loc_out : Loc r_out} ->
+              Arg [Exp Rev_my_ty loc_in ew []] -> Exp Rev_my_ty loc_out EW []
+filterLt5List_rev (ArgN a Arg0) =
+  CaseEither a
+    (\l =>
+        let ofs = GetFst l in
+        let lst = GetFst $ GetSnd l $ StaticEW ofs in
+        DeRefOffset ofs $ \i =>
+        LetRegion $ \r =>
+        LetRegionValue r (LtI64C 5 i) $ \b =>
+        CaseEither b
+          (\f => FunAppDef "filterLt5List_rev" filterLt5List_rev (ArgN (UnBox lst) Arg0))
+          (\t => let res = FunAppDef "filterLt5List_rev" filterLt5List_rev (ArgN (UnBox lst) Arg0) in
+                 MkLeft $ let j = Copy $ StaticEW i in MkPair (MkOffset j) $ MkPair (MkBox res) j
+          )
+        -- TODO: return input end-witness
+    )
+    --(\r => MkRight $ Copy $ StaticEW r)
+    (\r => MkRight MkT0)
+
+copyList_rev : {ew_in1 : _} -> {r_out : _} -> {loc_out : Loc r_out} ->
+           Arg [Exp Rev_my_ty loc_in1 ew_in1 []] -> Exp Rev_my_ty loc_out EW []
+copyList_rev (ArgN a Arg0) =
+  CaseEither a
+    (\l =>
+        let ofs = GetFst l in
+        let lst = GetFst $ GetSnd l $ StaticEW ofs in
+        DeRefOffset ofs $ \i =>
+        let res = FunAppDef "copyList_rev" copyList_rev (ArgN (UnBox lst) Arg0) in
+        MkLeft $ let j = Copy $ StaticEW i in MkPair (MkOffset j) $ MkPair (MkBox res) j
+        -- TODO: return input end-witness
+    )
+    (\r => MkRight MkT0)
+
+--covering
+appendList_rev :  {ew_in1 : _} ->
+                  {ew_in2 : _} ->
+             {r_out : _} -> {loc_out : Loc r_out} ->
+             -- ????? why should we specify n=2 ???
+             Arg {n=2} [Exp Rev_my_ty loc_in1 ew_in1 [], Exp Rev_my_ty loc_in2 ew_in2 []] ->
+             Exp Rev_my_ty loc_out EW []
+appendList_rev (ArgN a (ArgN b Arg0)) =
+  CaseEither a
+    (\l =>
+        let ofs = GetFst l in
+        let lst = GetFst $ GetSnd l $ StaticEW ofs in
+        DeRefOffset ofs $ \i =>
+        let res = FunAppDef "appendList_rev" appendList_rev (ArgN (UnBox lst) $ ArgN b Arg0) in
+        MkLeft $ let j = Copy $ StaticEW i in MkPair (MkOffset j) $ MkPair (MkBox res) j
+        -- TODO: return input end-witness
+    )
+    (\r => FunAppDef "copyList_rev" copyList_rev (ArgN b Arg0))
+
+public export
+test_14_bug : Program -- this actually works
+test_14_bug = Main $
+  LetRegion $ \r =>
+  LetRegionValue r (MkI64 1) $ \i =>
+  LetRegion $ \r =>
+  --LetRegionValue r (MkRight MkT0) $ \l =>
+  LetRegionValue r (FunAppDef "genList_rev" genList_rev (ArgN i Arg0)) $ \l1 =>
+  LetRegion $ \r =>
+  LetRegionValue r (FunAppDef "mapSuccList_rev" mapSuccList_rev (ArgN l1 Arg0)) $ \l2 =>
+  LetRegion $ \r =>
+  LetRegionValue r (FunAppDef "filterLt5List_rev" filterLt5List_rev (ArgN l2 Arg0)) $ \l3 =>
+  let l4 = FunAppDef "appendList_rev" appendList_rev (ArgN l3 $ ArgN l3 Arg0) in
+  PrintValue l1 $ \_ =>
+  PrintValue l4 $ \_ =>
+  LetRegion $ \r =>
+  LetRegionValue r (FunAppDef "printList_rev" printList_rev (ArgN l4 Arg0)) $ \_ => l4
+
+public export
+test_14_bug_unroll : Program -- this actually works
+test_14_bug_unroll = Main $
+  LetRegion $ \r =>
+  LetRegionValue r (MkI64 1) $ \i =>
+  LetRegion $ \r =>
+  --LetRegionValue r (MkRight MkT0) $ \l =>
+  LetRegionValue r (genList_rev (ArgN {fun="genList_rev"} i Arg0)) $ \l1 =>
+  LetRegion $ \r =>
+  LetRegionValue r (mapSuccList_rev (ArgN {fun="mapSuccList_rev"} l1 Arg0)) $ \l2 =>
+  LetRegion $ \r =>
+  LetRegionValue r (filterLt5List_rev (ArgN {fun="filterLt5List_rev"} l2 Arg0)) $ \l3 =>
+  let l4 = appendList_rev (ArgN {fun="appendList_rev"} l3 $ ArgN l3 Arg0) in
+  PrintValue l1 $ \_ =>
+  PrintValue l4 $ \_ =>
+  LetRegion $ \r =>
+  LetRegionValue r (printList_rev (ArgN {fun="printList_rev"} l4 Arg0)) $ \_ => l4
+
 
 test_12 : Program
-test_12 =
-  let genList : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Arg [Exp I64 loc_in EW []] -> Exp Rev_my_ty loc_out EW []
-      genList (ArgN i Arg0) =
-        LetRegion $ \r =>
-        LetRegionValue r (EqI64C 10 i) $ \b =>
-        CaseEither b
-          (\f =>
-              LetRegion $ \r =>
-              LetRegionValue r (AddI64C 1 i) $ \next =>
-              -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-              -- TODO: what should create the end-witness for COPY?
-              -- Q: what should be the rules for end-witness construction?
-              -- TODO: design the end-witness construction for value consumption primitives
-              -- IDEA/HACK: auto construct end-witness for static sized values/types
-              -- TODO: design the end-witness creation for either and tup and box type consuming operations
-              -- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-              ------------------------------------------
-              -- BUG! how to handle this?
-              {-
-              -- failing -- Q: what is this situation?
-              Copy i $ \i, i_copy =>
-              FunApp "genList" genList next $ \res =>
-              -}
-              -- working
-              let res = FunAppDef "genList" genList (ArgN next Arg0) in
-              --FunApp "genList" genList next $ \res =>
-              MkLeft $ let i = Copy $ StaticEW i in MkPair (MkOffset i) $ MkPair (MkBox res) i
-          )
-          (\t => MkRight MkT0)
-
-      printList : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Arg [Exp Rev_my_ty loc_in ew []] -> Exp T0 loc_out EW []
-      printList (ArgN a Arg0) =
-        CaseEither a
-          (\l =>
-              let ofs = GetFst l in
-              let lst = GetFst $ GetSnd l $ StaticEW ofs in
-              DeRefOffset ofs $ \i =>
-              PrintI64 i $ \_ =>
-              FunAppDef "printList" printList (ArgN (UnBox lst) Arg0)
-          )
-          (\r => MkT0)
-
-      mapSuccList : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} ->
-                    Arg [Exp Rev_my_ty loc_in ew []] -> Exp Rev_my_ty loc_out EW []
-      mapSuccList (ArgN a Arg0) =
-        CaseEither a
-          (\l =>
-              let ofs = GetFst l in
-              let lst = GetFst $ GetSnd l $ StaticEW ofs in
-              DeRefOffset ofs $ \i =>
-
-              let res = FunAppDef "mapSuccList" mapSuccList (ArgN (UnBox lst) Arg0) in
-              MkLeft $ let i = StaticEW $ AddI64C 1 i in MkPair (MkOffset i) $ MkPair (MkBox res) i
-              -- TODO: return input end-witness
-          )
-          --(\r => MkRight $ Copy $ StaticEW r)
-          (\r => MkRight MkT0)
-
-      filterLt5List : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} ->
-                    Arg [Exp Rev_my_ty loc_in ew []] -> Exp Rev_my_ty loc_out EW []
-      filterLt5List (ArgN a Arg0) =
-        CaseEither a
-          (\l =>
-              let ofs = GetFst l in
-              let lst = GetFst $ GetSnd l $ StaticEW ofs in
-              DeRefOffset ofs $ \i =>
-              LetRegion $ \r =>
-              LetRegionValue r (LtI64C 5 i) $ \b =>
-              CaseEither b
-                (\f => FunAppDef "filterLt5List" filterLt5List (ArgN (UnBox lst) Arg0))
-                (\t => let res = FunAppDef "filterLt5List" filterLt5List (ArgN (UnBox lst) Arg0) in
-                       MkLeft $ let i = Copy $ StaticEW i in MkPair (MkOffset i) $ MkPair (MkBox res) i
-                )
-              -- TODO: return input end-witness
-          )
-          --(\r => MkRight $ Copy $ StaticEW r)
-          (\r => MkRight MkT0)
-
-    -- error
-      {-
-      copyList : {ew_in1 : _} -> {r_in1 : _} -> {loc_in1 : Loc r_in1} -> Exp Rev_my_ty loc_in1 ew_in1 ->
-                 {r_out : _} -> {loc_out : Loc r_out} -> Exp Rev_my_ty loc_out EW
-      -}
-    -- ok
-      copyList : {ew_in1 : _} -> {r_in1 : _} -> {loc_in1 : Loc r_in1} -> {r_out : _} -> {loc_out : Loc r_out} ->
-                 Arg [Exp Rev_my_ty loc_in1 ew_in1 []] -> Exp Rev_my_ty loc_out EW []
-      copyList (ArgN a Arg0) =
-        CaseEither a
-          (\l =>
-              let ofs = GetFst l in
-              let lst = GetFst $ GetSnd l $ StaticEW ofs in
-              DeRefOffset ofs $ \i =>
-              let res = FunAppDef "copyList" copyList (ArgN (UnBox lst) Arg0) in
-              MkLeft $ let i = Copy $ StaticEW i in MkPair (MkOffset i) $ MkPair (MkBox res) i
-              -- TODO: return input end-witness
-          )
-          (\r => MkRight MkT0)
-
-
-      appendList : {ew_in1 : _} -> {r_in1 : _} -> {loc_in1 : Loc r_in1} ->
-                   {ew_in2 : _} -> {r_in2 : _} -> {loc_in2 : Loc r_in2} ->
-                   {r_out : _} -> {loc_out : Loc r_out} ->
-                   Arg [Exp Rev_my_ty loc_in1 ew_in1 [], Exp Rev_my_ty loc_in2 ew_in2 []] ->
-                   Exp Rev_my_ty loc_out EW []
-      appendList (ArgN a (ArgN b Arg0)) =
-        CaseEither a
-          (\l =>
-              let ofs = GetFst l in
-              let lst = GetFst $ GetSnd l $ StaticEW ofs in
-              DeRefOffset ofs $ \i =>
-              let res = FunAppDef "appendList" appendList (ArgN (UnBox lst) $ ArgN b Arg0) in
-              MkLeft $ let i = Copy $ StaticEW i in MkPair (MkOffset i) $ MkPair (MkBox res) i
-              -- TODO: return input end-witness
-          )
-          (\r => FunAppDef "copyList" copyList (ArgN b Arg0))
-
-  in Main $
-      LetRegion $ \r =>
-      LetRegionValue r (MkI64 1) $ \i =>
-      LetRegion $ \r =>
-      LetRegionValue r (FunAppDef "genList" genList (ArgN i Arg0)) $ \l =>
-      PrintValue l $ \_ =>
-      FunAppDef "printList" printList (ArgN l Arg0)
-
+test_12 = Main $
+  LetRegion $ \r =>
+  LetRegionValue r (MkI64 1) $ \i =>
+  LetRegion $ \r =>
+  LetRegionValue r (FunAppDef "genList_rev" genList_rev (ArgN i Arg0)) $ \l =>
+  PrintValue l $ \_ =>
+  FunAppDef "printList_rev" printList_rev (ArgN l Arg0)
 
 test_13 : Program
 test_13 = Main $
-      LetRegion $ \r =>
-      LetRegionValue r (let i1 = MkI64 9 in MkPair i1 (MkOffset i1)) $ \v =>
-      PrintValue v $ \_ =>
-      let i2 = GetFst v in
-      let i3 = GetSnd v $ StaticEW i2 in
-      DeRefOffset i3 $ \i4 =>
-      PrintI64 i4 $ \_ =>
-      MkT0
+  LetRegion $ \r =>
+  LetRegionValue r (let i1 = MkI64 9 in MkPair i1 (MkOffset i1)) $ \v =>
+  PrintValue v $ \_ =>
+  let i2 = GetFst v in
+  let i3 = GetSnd v $ StaticEW i2 in
+  DeRefOffset i3 $ \i4 =>
+  PrintI64 i4 $ \_ =>
+  MkT0
 
 test_14 : Program
 test_14 = Main $
-      LetRegion $ \r =>
-      LetRegionValue r (let i1 = MkI64 9 in MkPair i1 (MkPtr i1)) $ \v =>
-      PrintValue v $ \_ =>
-      let i2 = GetFst v in
-      let i3 = GetSnd v (StaticEW i2) in
-      DeRefPtr i3 $ \i4 =>
-      PrintI64 i4 $ \_ =>
-      MkT0
+  LetRegion $ \r =>
+  LetRegionValue r (let i1 = MkI64 9 in MkPair i1 (MkPtr i1)) $ \v =>
+  PrintValue v $ \_ =>
+  let i2 = GetFst v in
+  let i3 = GetSnd v (StaticEW i2) in
+  DeRefPtr i3 $ \i4 =>
+  PrintI64 i4 $ \_ =>
+  MkT0
 
 test_15 : Program
 test_15 =
-  let printPair : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Arg [Exp (Pair I64 I64) loc_in ew []] -> Exp T0 loc_out EW []
+  let printPair : {ew : _} -> {r_out : _} -> {loc_out : Loc r_out} -> Arg [Exp (Pair I64 I64) loc_in ew []] -> Exp T0 loc_out EW []
       printPair (ArgN p Arg0) =
         let fst = GetFst p in
         PrintI64 fst $ \fst =>
@@ -602,7 +637,7 @@ test_15 =
 
 test_16 : Program
 test_16 =
-  let printPair : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Arg [Exp (Pair I64 I64) loc_in ew []] -> Exp T0 loc_out EW []
+  let printPair : {ew : _} -> {r_out : _} -> {loc_out : Loc r_out} -> Arg [Exp (Pair I64 I64) loc_in ew []] -> Exp T0 loc_out EW []
       printPair (ArgN p Arg0) =
         let fst = GetFst p in
         PrintI64 fst $ \_ =>
@@ -616,7 +651,7 @@ test_16 =
 
 test_17 : Program
 test_17 =
-  let printPair : {ew : _} -> {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} -> Arg [Exp (Pair I64 I64) loc_in ew []] -> Exp T0 loc_out EW []
+  let printPair : {ew : _} -> {r_out : _} -> {loc_out : Loc r_out} -> Arg [Exp (Pair I64 I64) loc_in ew []] -> Exp T0 loc_out EW []
       printPair (ArgN p Arg0)=
         let fst = GetFst p in
         let snd = GetSnd p (StaticEW fst) in
@@ -630,7 +665,7 @@ test_17 =
 
 test_20 : Program
 test_20 =
-  let printPair2 : {r_in : _} -> {loc_in : Loc r_in} -> {r_out : _} -> {loc_out : Loc r_out} ->
+  let printPair2 : {r_out : _} -> {loc_out : Loc r_out} ->
                    Arg [Exp (Pair I64 I64) loc_in ew_in []] -> Exp T0 loc_out EW []
       printPair2 (ArgN p Arg0) =
         let fst = GetFst p in
@@ -647,8 +682,78 @@ test_20 =
 --compileProgram : String -> Program -> IO String
 --compileProgram _ _ = pure ""
 
+-- BUGS
+
+public export
+ListInt_Rev : Ty
+ListInt_Rev = Either (Pair (Box "ListInt_Rev" ListInt_Rev) I64) T0
+
+mapSuccListInt_Rev : {ew : _} -> {r_out : _} -> {loc_out : Loc r_out} -> Arg [Exp ListInt_Rev loc_in ew []] -> Exp ListInt_Rev loc_out EW []
+mapSuccListInt_Rev (ArgN a Arg0) =
+  CaseEither a
+    {-
+    (\l => let lst = GetFst l in
+           let i   = GetSnd l (GenEW lst) in
+           MkLeft $ MkPair (MkBox $ FunAppDef "mapSuccListInt_Rev" mapSuccListInt_Rev (ArgN (UnBox lst) Arg0)) $ AddI64C 1 i
+    )
+    -}
+    (\l => MkLeft ( MkPair (MkBox ( FunAppDef "mapSuccListInt_Rev" mapSuccListInt_Rev (ArgN (UnBox (GetFst l)) Arg0)))
+                           (I64Op2 Plus (LetRegionValue (MkRegion 8) (MkI64 1) id         ) (GetSnd l (GenEW (GetFst l))))))
+    {-
+    -- from hical
+    (\_ => MkLeft ( MkPair (MkBox ( FunAppDef "mapSuccListInt_Rev" mapSuccListInt_Rev (ArgN Var {-BUG-} Arg0)))
+                           (I64Op2 Plus (LetRegionValue (MkRegion 8) (MkI64 1) (\_ => Var)) (GetSnd Var (GenEW (GetFst Var))))))
+    -}
+{-
+                              (ArgN
+                                {s = [] {a = Type}}
+                                {fun = "mapSuccList"} {n = 0}
+                                {t = Either (Pair (Box "Rev_my_ty" Rev_my_ty) I64) T0}
+                                {r_arg = MkArgRegion "mapSuccList" 0}
+                                {loc_arg = LocAfterTag {r = MkArgRegion "mapSuccList" 0} "Pair" (Box "Rev_my_ty" Rev_my_ty)
+                                          (LocAfterTag {r = MkArgRegion "mapSuccList" 0} "Left" (Pair (Box "Rev_my_ty" Rev_my_ty) I64)
+                                          (LocStart (Either (Pair (Box "Rev_my_ty" Rev_my_ty) I64) T0) (MkArgRegion "mapSuccList" 0)))}
+                                {ew = EW}
+                                (Var
+                                  {{r:3205} = MkArgRegion "mapSuccList" 0}
+                                  {sew = [] {a = Type}} {ew = EW}
+                                  {loc = LocAfterTag {r = MkArgRegion "mapSuccList" 0} "Pair" (Box "Rev_my_ty" Rev_my_ty)
+                                        (LocAfterTag {r = MkArgRegion "mapSuccList" 0} "Left" (Pair (Box "Rev_my_ty" Rev_my_ty) I64)
+                                        (LocStart (Either (Pair (Box "Rev_my_ty" Rev_my_ty) I64) T0) (MkArgRegion "mapSuccList" 0)))}
+                                  {t = Either (Pair (Box "Rev_my_ty" Rev_my_ty) I64) T0})
+                                (Arg0 {fun = "mapSuccList"})))
+-}
+    (\r => MkRight MkT0)
+
+{-
+  hical compiled code for mapSuccListInt_Rev with main expression
+  Main (LetRegionValue (MkRegion 1) (MkRight MkT0)
+    (\_ => FunAppDef "mapSuccList" 
+    (\_ => CaseEither Var (\_ => MkLeft (MkPair (MkBox (FunApp "mapSuccList" (ArgN Var Arg0))) (I64Op2 Plus (LetRegionValue (MkRegion 8) (MkI64 1) (\_ => Var)) (GetSnd Var (GenEW (GetFst Var)))))) (\_ => MkRight MkT0)) (ArgN Var Arg0)))
+
+  hical compiled code for mapSuccListInt_Rev
+
+  (\_ =>
+    CaseEither Var
+      (\_ => MkLeft (MkPair
+                (MkBox (FunApp "mapSuccList" (ArgN Var Arg0)))
+                (I64Op2 Plus (LetRegionValue (MkRegion 8) (MkI64 1) (\_ => Var)) (GetSnd Var (GenEW (GetFst Var))))))
+      (\_ => MkRight MkT0)
+  )
+-}
+
+test_bug01 : Program
+test_bug01 = Main $
+  LetRegion $ \r =>
+  LetRegionValue r (MkRight MkT0) $ \l =>
+  let x = FunAppDef "mapSuccListInt_Rev" mapSuccListInt_Rev (ArgN l Arg0) in
+  PrintValue x $ \_ => x
+
 partial main : IO ()
 main = do
+  _ <- compileProgram "test_bug01" test_bug01
+  _ <- compileProgram "test_14_bug" test_14_bug
+  --_ <- compileProgram "test_14_bug_unroll" test_14_bug_unroll -- TODO: fix bug
   --putStr !(toBufferDyn sample_box_03)
   --putStr !(toBufferDyn sample_box_04)
   --putStr !(toBufferDyn sample_box_05)
@@ -698,12 +803,14 @@ main = do
   _ <- compileProgram "test10" test_10
   _ <- compileProgram "test11" test_11
   -}
+
   _ <- compileProgram "test12" test_12
   _ <- compileProgram "test13" test_13
   _ <- compileProgram "test14" test_14
   _ <- compileProgram "test15" test_15
   _ <- compileProgram "test16" test_16
   _ <- compileProgram "test17" test_17
+
   pure ()
 {-
 TODO:
