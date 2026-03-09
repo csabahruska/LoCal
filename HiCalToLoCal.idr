@@ -23,15 +23,30 @@ data LoExp2 : Lo.Ty -> Type where
 data LoExp3 : Lo.Ty -> Type where
   MkLoExp3 : {ew : _} -> {t : _} -> {r : _} -> {loc : Loc r} -> Exp t loc ew [] -> LoExp3 t
 
-data LoArg : Type where
-  MkLoArg : {-{t : _} -> -}Lo.Arg t -> LoArg
+data LoArg : (fun : String) -> (n : Nat) -> Type where
+  MkLoArg : {-{t : _} -> -} Lo.Arg {fun} {n} t -> LoArg fun n
+
+{-
+assertHoleFree (MkOffset e) = assertHole r >> assertHoleFree e
+assertHoleFree (DeRefOffset e cont) = assertHole r >> assertHoleFree e >> assertHoleFree (cont {r_val=MkRegion !(newId)} Var)
+assertHoleFree (MkPtr e) = assertHole r >> assertHoleFree e
+assertHoleFree (DeRefPtr e cont) = assertHole r >> assertHoleFree e >> assertHoleFree (cont {r_val=MkRegion !(newId)} Var)
+assertHoleFree (PairEW a b) = assertHole r >> assertHoleFree a >> assertHoleFree b
+assertHoleFree (LeftEW a b) = assertHole r >> assertHoleFree a >> assertHoleFree b
+assertHoleFree (RightEW a b) = assertHole r >> assertHoleFree a >> assertHoleFree b
+-}
+
 
 argLen : Lo.Arg x -> Nat
 argLen Arg0 = 0
 argLen (ArgN _ a) = 1 + argLen a
 
+hiArgLen : Hi.Arg x -> Nat
+hiArgLen Arg0 = 0
+hiArgLen (ArgN _ a) = 1 + hiArgLen a
+
 toVar : {t1 : _} -> {r1 : _} -> {loc1 : Loc r1} -> {ew1 : _} -> Lo.Exp t1 loc1 ew1 [] -> Lo.Exp t1 loc1 ew1 []
-toVar _ = Var
+toVar _ = Lo.Var
 
 record LocState where
   constructor MkLocState
@@ -60,6 +75,7 @@ assertHole msg (MkRegion rid) = do
   Nothing <- gets $ lookup rid . (.holes)
     | Just _ => assert_total $ idris_crash $ "\{msg} exp in hole region \{rid}"
   pure ()
+assertHole msg (MkArgRegion _ _) = pure ()
 
 newId : M Int
 newId = state (\m => ({counter $= (+ 1)} m, m.counter))
@@ -190,7 +206,7 @@ readExp (Var i) = lookupLoExp i >>= \case
     rid <- newId
     addHole rid i -- region-id => Hi.Var id
     traceM "new hole \{rid} => Hi.Var id: \{i} type: \{show t}"
-    pure $ MkLoExp2 $ LetRegionValue (MkRegion rid) Var id
+    pure $ MkLoExp2 $ LetRegionValue (MkRegion rid) Lo.Var id
 -- TODO: maybe other expressions are possible
 readExp (UnBox a) = do
   MkLoExp2 a_lo <- readExp a
@@ -218,8 +234,8 @@ readExp (CaseEither {a, b} scrut l_cont r_cont) = do
   MkLoExp2 {loc=loc_scrut} scrut_lo <- readExp scrut
   let locL = LocAfterTag "Left"  (compileTy a) loc_scrut
       locR = LocAfterTag "Right" (compileTy b) loc_scrut
-  addLoExp {t=compileTy a} {loc=locL} l Var
-  addLoExp {t=compileTy b} {loc=locR} r Var
+  addLoExp {t=compileTy a} {loc=locL} l Lo.Var
+  addLoExp {t=compileTy b} {loc=locR} r Lo.Var
   MkLoExp2 {r=l_r, loc=l_loc} l_cont_lo <- readExp $ l_cont $ Var l
   MkLoExp2 {r=r_r, loc=r_loc} r_cont_lo <- readExp $ r_cont $ Var r
   case decEq l_r r_r of
@@ -251,7 +267,7 @@ readExp e@(MkI64{})     = allocInNewRegion e
 readExp e@(MkPair{})    = allocInNewRegion e
 readExp e@(MkLeft{})    = allocInNewRegion e
 readExp e@(MkRight{})   = allocInNewRegion e
-readExp e@(FunAppDef{}) = assert_total $ idris_crash "readExp - FunAppDef" --allocInNewRegion e
+readExp e@(FunAppDef{}) = allocInNewRegion e
 readExp e@(I64Op2{})    = allocInNewRegion e
 readExp e@(I64Cmp{})    = allocInNewRegion e
 
@@ -277,18 +293,27 @@ writeExp (MkBox a) = pure $ MkBox !(writeExp a)
            String -> (fun_def : Arg exps_in -> Exp res loc_res EW fun_ews) -> (fun_args : Arg exps_in) -> Exp res loc_res EW fun_ews
 -}
 writeExp (FunAppDef name def args) = do
+
   -- done - only convert once!
   -- Q: how to support recursion?
   -- A: FunApp
-  let readArg : Hi.Arg x -> M (Hi.Arg x, LoArg)
-      readArg Arg0 = pure $ (Arg0, MkLoArg Arg0)
-      readArg (ArgN {t} e a) = do
+  -- TODO: prove that Hi.Arg x has length of n
+{-
+      let toParams : {fun : _} -> Arg {fun} {n} a -> Arg {fun} {n} a
+          toParams (Arg0) = Arg0
+          toParams (ArgN {fun, t, n} e a) = ArgN {n, loc_arg=LocStart t $ MkArgRegion fun n} Var $ toParams {n} a
+-}
+  let readArg : Hi.Arg {n} x -> M (Hi.Arg {n} x, LoArg name n)
+      readArg {n=0} Hi.Arg0 = pure $ (Hi.Arg0, MkLoArg Lo.Arg0)
+      readArg {n=S n} (ArgN {t} e a) = do
         i <- newId
         -- Q: should we save this var ids?
         MkLoExp2 {loc=e_loc} e_lo <- readExp e
         --addLoExp : {t : _} -> {r : _} -> {loc : Loc r} -> Int -> Exp t loc EW [] -> M ()
-        addLoExp {t=compileTy t, loc=e_loc} i Lo.Var
+        let loc_arg=LocStart (compileTy t) $ MkArgRegion name n
+        addLoExp {t=compileTy t, loc=loc_arg} i Lo.Var
         (l, MkLoArg a_lo) <- readArg a
+        traceM "ArgN - writeExp - FunAppDef \{name} - readArg \{n} - \{showLoExpTag e_lo}"
         pure (ArgN (Hi.Var i) l, MkLoArg $ Lo.ArgN e_lo a_lo)
 
   (args_hi, MkLoArg args_lo) <- readArg args
@@ -322,8 +347,8 @@ writeExp (CaseEither {a, b} scrut l_cont r_cont) = do
   MkLoExp2 {loc=loc_scrut} scrut_lo <- readExp scrut
   let locL = LocAfterTag "Left"  (compileTy a) loc_scrut
       locR = LocAfterTag "Right" (compileTy b) loc_scrut
-  addLoExp {t=compileTy a} {loc=locL} l Var
-  addLoExp {t=compileTy b} {loc=locR} r Var
+  addLoExp {t=compileTy a} {loc=locL} l Lo.Var
+  addLoExp {t=compileTy b} {loc=locR} r Lo.Var
   l_cont_lo <- writeExp $ l_cont $ Var l
   r_cont_lo <- writeExp $ r_cont $ Var r
   pure $ CaseEither scrut_lo (\l => l_cont_lo) (\r => r_cont_lo)
@@ -378,6 +403,7 @@ writeExp (Let {a} v cont) = do
   i <- newId
   addHiExp i v -- BUG: this is not the right semantics, what if it has no write position?
   s1 <- get
+  traceM " ---- BACKTRACK POINT \{s1.counter} -----"
   le <- writeExp $ cont $ Var i
   --pure $ LetTick i !(writeExp $ cont $ Var i)
   -- TODO: uncovered case, when 'v' was used only in read positions
@@ -391,6 +417,7 @@ writeExp (Let {a} v cont) = do
   lookupLoExp i >>= \case
     Just _ => pure le
     Nothing => do
+      traceM " ---- BACKTRACK TO \{s1.counter} -----"
       put s1
       -- HINT: create region for intermediate value
       let rid = MkRegion !newId
@@ -482,7 +509,7 @@ fixHolesReadEW a = do
     No _     => assert_total $ idris_crash "EW mismatch"
     Yes Refl => pure $ MkLoExp2 a_lo
 
-fixHolesRead {t} (LetRegionValue (MkRegion rid) Var _) = do
+fixHolesRead {t} (LetRegionValue (MkRegion rid) Lo.Var _) = do
   MkLoExp {t=t_le} le <- getHoleExp rid
   case decEq t t_le of
     No _     => assert_total $ idris_crash "type mismatch"
@@ -490,7 +517,7 @@ fixHolesRead {t} (LetRegionValue (MkRegion rid) Var _) = do
 
 fixHolesRead (LetRegionValue val_r val cont) = do
   val2 <- fixHolesWrite val
-  MkLoExp3 cont2 <- fixHolesRead $ cont Var
+  MkLoExp3 cont2 <- fixHolesRead $ cont Lo.Var
   pure $ MkLoExp3 $ LetRegionValue val_r val2 (\_ => cont2)
 
 fixHolesRead (PrintI64 a cont) = do
@@ -507,8 +534,8 @@ fixHolesRead (CaseEither {a, b} scrut l_cont r_cont) = do
   MkLoExp3 {loc=scrut_loc} scrut_lo <- fixHolesRead scrut
   let locL = LocAfterTag "Left"  a scrut_loc
       locR = LocAfterTag "Right" b scrut_loc
-  MkLoExp3 {ew=l_ew, r=l_r, loc=l_loc} l_cont_lo <- fixHolesRead $ l_cont Var
-  MkLoExp3 {ew=r_ew, r=r_r, loc=r_loc} r_cont_lo <- fixHolesRead $ r_cont Var
+  MkLoExp3 {ew=l_ew, r=l_r, loc=l_loc} l_cont_lo <- fixHolesRead $ l_cont Lo.Var
+  MkLoExp3 {ew=r_ew, r=r_r, loc=r_loc} r_cont_lo <- fixHolesRead $ r_cont Lo.Var
   case decEq l_ew r_ew of
     No _     => assert_total $ idris_crash "EW mismatch"
     Yes Refl => case decEq l_r r_r of
@@ -526,8 +553,9 @@ fixHolesRead (CaseEither {a, b} scrut l_cont r_cont) = do
   Just i <- gets $ lookup rid . (.holes)
     | Nothing => assert_total $ idris_crash $ "missing hole for \{rid}"
 -}
-fixHolesRead {loc, ew} v@Var = do
+fixHolesRead {loc, ew} v@Lo.Var = do
   let (MkRegion rid) = r
+        | _ => pure (MkLoExp3 v) --assert_total $ idris_crash "expected MkRegion"
   gets (lookup rid . (.holes)) >>= \case
     Nothing => pure (MkLoExp3 v)
     {-
@@ -544,7 +572,7 @@ fixHolesRead {loc, ew} v@Var = do
           fixLoc r2 (LocAfterTag s a l1) = LocAfterTag s a $ fixLoc r2 l1
 
       MkLoExp {r=r_le} le <- getHoleExp rid
-      pure $ MkLoExp3 {r=r_le, loc=fixLoc r_le loc, ew=ew} Var
+      pure $ MkLoExp3 {r=r_le, loc=fixLoc r_le loc, ew=ew} Lo.Var
 
 fixHolesRead {loc} (MkI64{})    = pure $ MkLoExp3 {loc, ew=EW} $ Var
 fixHolesRead {loc} (MkT0{})     = pure $ MkLoExp3 {loc, ew=EW} $ Var
@@ -554,8 +582,8 @@ fixHolesRead {loc} (Copy{})     = pure $ MkLoExp3 {loc, ew=EW} $ Var
 fixHolesRead {loc} (MkPair{})   = pure $ MkLoExp3 {loc, ew=EW} $ Var
 fixHolesRead {loc} (MkLeft{})   = pure $ MkLoExp3 {loc, ew=EW} $ Var
 fixHolesRead {loc} (MkRight{})  = pure $ MkLoExp3 {loc, ew=EW} $ Var
-fixHolesRead (MkBox a) = fixHolesRead a >>= \(MkLoExp3 {loc=a_loc, ew=a_ew} a_lo) => pure $ MkLoExp3 {loc=a_loc, ew=a_ew} Var
-fixHolesRead (UnBox a) = fixHolesRead a >>= \(MkLoExp3 {loc=a_loc, ew=a_ew} a_lo) => pure $ MkLoExp3 {loc=a_loc, ew=a_ew} Var
+fixHolesRead (MkBox a) = fixHolesRead a >>= \(MkLoExp3 {loc=a_loc, ew=a_ew} a_lo) => pure $ MkLoExp3 {loc=a_loc, ew=a_ew} $ MkBox a_lo
+fixHolesRead (UnBox a) = fixHolesRead a >>= \(MkLoExp3 {loc=a_loc, ew=a_ew} a_lo) => pure $ MkLoExp3 {loc=a_loc, ew=a_ew} $ UnBox a_lo
 fixHolesRead (GetFst tup) = fixHolesRead tup >>= \(MkLoExp3 tup_lo) => pure $ MkLoExp3 (GetFst tup_lo)
 
 fixHolesRead (GetSnd {a} tup fst) = do
@@ -568,7 +596,7 @@ fixHolesRead (GetSnd {a} tup fst) = do
       Yes Refl => pure $ MkLoExp3 (GetSnd tup_lo fst_lo)
       _ => assert_total $ idris_crash "GetSnd loc decEq needs some fix"
 
-fixHolesRead v@(GenEW{}) = pure $ MkLoExp3 v -- assert_total $ idris_crash "TODO - GenEW"
+fixHolesRead (GenEW a) = fixHolesRead a >>= \(MkLoExp3 {loc=a_loc} a_lo) => pure $ MkLoExp3 {loc=a_loc} $ GenEW a_lo
 fixHolesRead (FunAppDef{}) = assert_total $ idris_crash "fixHolesRead - FunAppDef"
 fixHolesRead (FunApp{}) = assert_total $ idris_crash "fixHolesRead - FunApp"
 fixHolesRead _ = assert_total $ idris_crash "impossible case"
@@ -688,6 +716,7 @@ data Lo.Arg : (sig : List Type) -> Type where
 
 fixHolesWrite : {t : _} -> {r : _} -> {loc : Loc r} -> (Lo.Exp t loc EW []) -> M (Lo.Exp t loc EW [])
 -}
+
 fixHolesWrite (FunAppDef name def arg) = do
   {-
     TODO:
@@ -695,23 +724,25 @@ fixHolesWrite (FunAppDef name def arg) = do
       - create new fun def arg (Var) to apply them to def body
       - fix holes in def body
   -}
-  let fixHolesReadArg : {-{x : List Type} -> -}Lo.Arg x -> M LoArg
+
+  let fixHolesReadArg : {-{x : List Type} -> -}Lo.Arg {fun} {n} x -> M (LoArg fun n)
       --fixHolesReadArg = ?fixHolesReadArg0
       --fixHolesReadArg (ArgN e a) = pure $ MkLoArg $ ArgN e a
       --fixHolesReadArg (Lo.ArgN {t=t1, r=r1, loc=loc1, ew=ew1} e a) = do
-      fixHolesReadArg (Lo.ArgN e a) = do
+      fixHolesReadArg (Lo.ArgN {n} e a) = do
         MkLoExp3 e_lo <- fixHolesRead e
         MkLoArg a_lo <- fixHolesReadArg a
+        traceM "ArgN - fixHolesWrite - FunAppDef \{name} - fixHolesReadArg \{n} - \{showLoExpTag e} \{showLoExpTag e_lo}"
         pure $ MkLoArg $ ArgN e_lo a_lo
       fixHolesReadArg Lo.Arg0 = pure $ MkLoArg Arg0 -- Q: why is this needed to for coverage?
 
-      toArgVar : Lo.Arg x -> Lo.Arg x
+      toArgVar : {fun : _} -> Lo.Arg {fun} {n} x -> Lo.Arg {fun} {n} x
       toArgVar Arg0 = Arg0
-      toArgVar (ArgN e a) = ArgN Var $ toArgVar a
+      toArgVar (ArgN {r_arg, loc_arg} e a) = ArgN {r_arg, loc_arg} Var $ toArgVar a
 
   MkLoArg arg_lo <- fixHolesReadArg arg
   --body_lo <- fixHolesWrite $ (believe_me def) $ toArgVar arg_lo
-  body_lo <- fixHolesWrite $ def $ toArgVar arg
+  body_lo <- fixHolesWrite $ def $ arg -- toArgVar arg
   unless (argLen arg_lo == argLen arg) $ assert_total $ idris_crash "arg len mismatch - FunAppDef \{argLen arg_lo} \{argLen arg}"
   --trace "arg len OK - FunAppDef \{argLen arg_lo} \{argLen arg} \{name}" $
   pure $ FunAppDef name (\_ => body_lo) arg_lo
@@ -725,20 +756,22 @@ fixHolesWrite (FunAppDef name def arg) = do
     No _     => assert_total $ idris_crash "fixHolesWrite FunAppDef res"
     Yes Refl => pure $ FunAppDef {exp_ins=exp_ins2} {res=t} name (\_ => body_lo2) $ believe_me args_lo
 -}
+
 --fixHolesReadArg : {t : _} -> Lo.Arg t -> M LoArg
-fixHolesWrite (FunApp n arg) = do -- assert_total $ idris_crash "fixHolesWrite - FunApp \{n}"
-  let fixHolesReadArg : {-{x : _} -> -}Lo.Arg x -> M LoArg
+fixHolesWrite (FunApp name arg) = do -- assert_total $ idris_crash "fixHolesWrite - FunApp \{name}"
+  let fixHolesReadArg : {-{x : _} -> -}Lo.Arg {fun} {n} x -> M (LoArg fun n)
       --fixHolesReadArg (ArgN e a) = pure $ MkLoArg $ ArgN e a
-      fixHolesReadArg (ArgN e a) = do
+      fixHolesReadArg (ArgN {n} e a) = do
         MkLoExp3 e_lo <- fixHolesRead e
         MkLoArg a_lo <- fixHolesReadArg a
+        traceM "ArgN - fixHolesWrite - FunApp \{name} - fixHolesReadArg \{n} - \{showLoExpTag e} \{showLoExpTag e_lo}"
         pure $ MkLoArg $ ArgN e_lo a_lo
       fixHolesReadArg Arg0 = pure $ MkLoArg Arg0 -- Q: why is this needed to for coverage?
       --fixHolesReadArg Arg0 = pure $ MkLoArg Arg0 -- Q: why is this not enough for coverage?
   MkLoArg arg_lo <- fixHolesReadArg arg
   unless (argLen arg_lo == argLen arg) $ assert_total $ idris_crash "arg len mismatch - FunApp \{argLen arg_lo} \{argLen arg}"
-  --trace "arg len OK - FunApp \{argLen arg_lo} \{argLen arg} \{n}" $
-  pure $ FunApp n arg_lo
+  --trace "arg len OK - FunApp \{argLen arg_lo} \{argLen arg} \{name}" $
+  pure $ FunApp name arg_lo
 
 fixHolesWrite (MkOffset{}) = assert_total $ idris_crash "fixHolesWrite - MkOffset"
 fixHolesWrite (DeRefOffset{}) = assert_total $ idris_crash "fixHolesWrite - DeRefOffset"

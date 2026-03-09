@@ -1,5 +1,6 @@
 module HiCal
 
+import Data.Vect
 import Decidable.Equality
 
 public export
@@ -28,9 +29,9 @@ public export
 data Exp : (t : Ty) -> Type
 
 public export
-data Arg : (sig : List Type) -> Type where
-  Arg0 : Arg []
-  ArgN : {t : _} -> Exp t -> Arg s -> Arg (Exp t :: s)
+data Arg : {n : Nat} -> (sig : List Type) -> Type where
+  Arg0 : Arg {n=0} []
+  ArgN : {n : _} -> {t : _} -> Exp t -> Arg {n} s -> Arg {n=S n} (Exp t :: s)
 
 data Exp where
 
@@ -49,7 +50,7 @@ data Exp where
   CasePair   : {a, b, c : Ty} -> Exp (Pair a b) -> (Exp a -> Exp b -> Exp c) -> Exp c
   CaseEither : {a, b, c : Ty} -> Exp (Either a b) -> (Exp a -> Exp c) -> (Exp b -> Exp c) -> Exp c
 
-  FunAppDef : String -> (Arg exps_in -> Exp res) -> Arg exps_in -> Exp res
+  FunAppDef : String -> (Arg {n} exps_in -> Exp res) -> Arg {n} exps_in -> Exp res
 
   -- primitive values
   MkT0  : Exp T0

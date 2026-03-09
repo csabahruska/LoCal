@@ -15,6 +15,13 @@ test2 = Hi.compileProgram $ Main $ PrintI64 (MkI64 1) $ \() => MkT0
 test3 = Hi.compileProgram $ Main $ Let (MkI64 1) $ \i => PrintI64 i $ \() => i
 test4 = Hi.compileProgram $ Main $ Let (MkI64 1) $ \i => Let (MkPair (I64Op2 Plus i i) i) $ \j => PrintValue j $ \() => j
 test12 = Hi.compileProgram test_12
+test12_bug = Hi.compileProgram test_12_bug
+test13 = Hi.compileProgram test_13
+test13_unroll = Hi.compileProgram test_13_unroll
+test14_bug = Hi.compileProgram test_14_bug
+test14_bug2 = Hi.compileProgram test_14_bug2
+test14_bug_full = Hi.compileProgram test_14_bug_full
+
 {-
   Main {res = Pair I64 I64}
     (MkPair {{r:2038} = MkRegion -1} {a = I64} {b = I64} {loc = LocStart (Pair I64 I64) (MkRegion -1)}
@@ -31,10 +38,21 @@ partial main : IO ()
 main = do
   putStrLn "starting.."
   --_ <- Lo.compileProgram "hi_test01-dummy" $ Main MkT0
+
+  --_ <- Lo.compileProgram "test14_bug_full" test14_bug_full -- TODO: fix bug
+
   _ <- Lo.compileProgram "hi_test00" test0
   _ <- Lo.compileProgram "hi_test01" test1
   _ <- Lo.compileProgram "hi_test02" test2
   _ <- Lo.compileProgram "hi_test03" test3
   _ <- Lo.compileProgram "hi_test04" test4
+
+
+  _ <- Lo.compileProgram "hi_test12_bug" test12_bug -- fixed
   _ <- Lo.compileProgram "hi_test12" test12
+  _ <- Lo.compileProgram "hi_test13" test13
+
+  _ <- Lo.compileProgram "hi_test13_unroll_bug" test13_unroll -- TODO: fix bug
+  _ <- Lo.compileProgram "hi_test14_bug" test14_bug -- fixed
+  _ <- Lo.compileProgram "hi_test14_bug2" test14_bug2 -- fixed
   pure ()
