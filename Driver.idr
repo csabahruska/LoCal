@@ -21,6 +21,7 @@ test13_unroll = Hi.compileProgram test_13_unroll
 test14_bug = Hi.compileProgram test_14_bug
 test14_bug2 = Hi.compileProgram test_14_bug2
 test14_bug_full = Hi.compileProgram test_14_bug_full
+test14_bug_full_unroll = Hi.compileProgram test_14_bug_full_unroll
 
 {-
   Main {res = Pair I64 I64}
@@ -39,7 +40,8 @@ main = do
   putStrLn "starting.."
   --_ <- Lo.compileProgram "hi_test01-dummy" $ Main MkT0
 
-  --_ <- Lo.compileProgram "test14_bug_full" test14_bug_full -- TODO: fix bug
+  --_ <- Lo.compileProgram "hi_test14_bug_full_unroll" test14_bug_full_unroll -- TODO: fix bug
+  _ <- Lo.compileProgram "hi_test14_bug_full" test14_bug_full -- fixed
 
   _ <- Lo.compileProgram "hi_test00" test0
   _ <- Lo.compileProgram "hi_test01" test1
@@ -52,7 +54,7 @@ main = do
   _ <- Lo.compileProgram "hi_test12" test12
   _ <- Lo.compileProgram "hi_test13" test13
 
-  _ <- Lo.compileProgram "hi_test13_unroll_bug" test13_unroll -- TODO: fix bug
+  _ <- Lo.compileProgram "hi_test13_unroll_bug" test13_unroll -- fixed
   _ <- Lo.compileProgram "hi_test14_bug" test14_bug -- fixed
   _ <- Lo.compileProgram "hi_test14_bug2" test14_bug2 -- fixed
   pure ()
