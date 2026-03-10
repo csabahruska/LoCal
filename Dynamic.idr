@@ -108,8 +108,16 @@ emptyCG = MkCG
   }
 
 debug : M () -> M ()
-debug a = a
---debug _ = pure ()
+--debug a = a
+debug _ = pure ()
+
+printSrc : M ()
+printSrc = do
+  cg <- get
+  Just funLines <- pure $ lookup cg.local.funName cg.code
+    | Nothing => assert_total $ idris_crash "unknown function: \{cg.local.funName}"
+  putStrLn . unlines . reverse $ funLines
+
 
 -- actions
 
@@ -121,7 +129,7 @@ runActions f loc = case lookup (show loc) !(gets f) of
   Nothing   => pure ()
   Just acts => do
     putStrLn "RUN ACTIONS \{loc}"
-    sequence_ acts
+    sequence_ $ reverse acts
 
 runWriteActions : Loc r -> M ()
 runWriteActions loc = do
@@ -187,7 +195,7 @@ markAlloc : Loc r -> M a -> M a
           reads always come after writes
 -}
 markAlloc loc action = case lookup (show loc) !(gets (.local.locations)) of
-  Just c  => assert_total $ idris_crash $ "\{c} is already allocated for \{loc}"
+  Just c  => printSrc >> assert_total (idris_crash $ "\{c} is already allocated for \{loc}")
   Nothing => action
 
 newId : M Int
@@ -218,13 +226,6 @@ localScope m = do
          , local.write      := writes
          }
   pure res
-
-printSrc : M ()
-printSrc = do
-  cg <- get
-  Just funLines <- pure $ lookup cg.local.funName cg.code
-    | Nothing => assert_total $ idris_crash "unknown function: \{cg.local.funName}"
-  putStrLn . unlines . reverse $ funLines
 
 emit : String -> M ()
 emit s = do
@@ -282,7 +283,7 @@ showLocs locs = unlines $ map show $ Data.SortedMap.toList locs
 getEndWitness : (loc : Loc r) -> M String
 getEndWitness loc = do
   Just ew <- lookupEndWitness loc
-    | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: missing loc endwitness for \{loc}\n endwitness map:\n\{showLocs !(gets (.local.endwitness))}"
+    | Nothing => printSrc >> assert_total (idris_crash $ "INTERNAL ERROR: missing loc endwitness for \{loc}\n endwitness map:\n\{showLocs !(gets (.local.endwitness))}")
   pure ew
 
 lookupCursor : (loc : Loc r) -> M (Maybe String)
@@ -296,6 +297,9 @@ getCursor loc = do
   Just cur <- pure $ lookup (show loc) locs
         | Nothing => printSrc >> assert_total (idris_crash $ "INTERNAL ERROR: missing loc cursor for:\n \{loc}\n\n locations map:\n\{showLocs locs}")
   pure cur
+
+whenWritten : Loc r -> (M ()) -> M ()
+whenWritten loc action = when (contains (show loc) !(gets (.local.write))) action
 
 getWrittenCursor : Loc r -> (String -> M ()) -> M ()
 getWrittenCursor loc action = do
@@ -412,6 +416,11 @@ Show CGMode where
   show ReadDyn = "ReadDyn"
 Interpolation CGMode where interpolate = show
 
+Show EndWitness where
+  show EW = "EW"
+  show NoEW = "NoEW"
+Interpolation EndWitness where interpolate = show
+
 fillDyn  : {ew : _} -> {loc : _} -> Exp t loc ew _ -> M ()
 readDyn  : {ew : _} -> {loc : _} -> Exp t loc ew _ -> M ()
 evalCont : {ew : _} -> {loc : _} -> Exp t loc ew _ -> CGMode -> M ()
@@ -456,6 +465,13 @@ genTraversalEW e = do
     Just fun_name => pure fun_name
   cur <- getCursor loc
   pure "\{fun_name}(\{cur})"
+
+readArgs : Arg _ -> M ()
+readArgs Arg0 = pure ()
+readArgs (ArgN {t, fun, n} e a) = do
+  --let loc = LocStart t $ MkArgRegion fun n
+  readDyn e
+  readArgs a
 
 -- buffer codegen
 -- ?? read or write
@@ -599,12 +615,10 @@ fillDyn (Copy {loc_in} v) = do
 
 fillDyn (FunApp {fun_ews, loc_res} fun_name args) = do
   putStrLn " ++ FunApp \{fun_name}"
-  let readArgs : Arg _ -> M ()
-      readArgs Arg0 = pure ()
-      readArgs (ArgN e a) = readDyn e >> readArgs a
   readArgs args
   -- TODO: handle returning ews
   unless (null fun_ews) $ assert_total $ idris_crash $ "TODO - handle FunApp fun_ews"
+  putStrLn " ++ FunApp \{fun_name} - 1"
   cur_out <- allocCursor loc_res
   let buildCall : List String -> Arg _ -> M ()
       buildCall curs (ArgN {loc_arg} _ a) = getWrittenCursor loc_arg $ \cur_in => putStrLn "FunApp \{fun_name} - arg - \{cur_in}" >> buildCall (cur_in :: curs) a
@@ -741,8 +755,8 @@ evalCont (DeRefPtr {x, r_in, loc_in} v cont) mode = do
     markWrite loc_val $ pure ()
     evalCGMode mode (cont {r_val} Var)
 
-evalCont (CaseEither {a, b, loc_scrut} scrut cont_left cont_right) mode = do
-  lift $ putStrLn " ++ CaseEither \{loc_scrut} \{mode}"
+evalCont (CaseEither {a, b, loc_scrut, ew_scrut} scrut cont_left cont_right) mode = do
+  lift $ putStrLn " ++ CaseEither scrut: \{loc_scrut} \{ew_scrut} \{mode} loc: \{loc} \{ew}"
   readDyn scrut
   getWrittenCursor loc_scrut $ \cur_tag => do
     lift $ putStrLn " ++ CaseEither \{loc_scrut} - 1  \{mode}"
@@ -755,40 +769,64 @@ evalCont (CaseEither {a, b, loc_scrut} scrut cont_left cont_right) mode = do
     emit "char* \{cur_res_tmp} = 0; // uninitalized CaseEither result"
     emit "char* \{cur_end_tmp} = 0; // uninitalized CaseEither result end-witness"
     emit "char* \{cur_tag_end_tmp} = 0; // uninitalized CaseEither scrutinee end-witness"
-
-    let writeResAndScrutEW = do
-          Just ew <- lookupEndWitness loc_scrut
-            | Nothing => pure False
-          emit "\{cur_tag_end_tmp} = \{ew};"
-          emit "\{cur_res_tmp} = \{!(getCursor loc)};"
-          pure True
-
+{-
+    cur20_res_tmp_end_tmp = cur25_end; // FIX
+-}
     cg <- get
     emit "if (*(char*) \{cur_tag} == 0) { // LEFT"
-    (scrut_ew_left, left_cglocal) <- indent $ localScope $ do
-      _ <- markAlreadyWritten locL $ allocCursor locL
+    ({-(has_res_cur_left, scrut_ew_left), -}left_cglocal) <- indent $ localScope $ do
+      _ <- markAlreadyWritten locL $ allocCursorIfNeeded locL
       let expL = cont_left Var
       evalCGMode mode expL
       putStrLn " LEFT finished - 1 \{mode}"
       -- Q: is this always needed or it depends on the mode?
-      case mode of
-        FillDyn => emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expL)};"
-        ReadDyn => pure () -- TODO: what to do when it has end-witness?
+      whenWritten loc $ do
+        emit "\{cur_res_tmp} = \{!(getCursor loc)};"
+        case ew of
+          EW    => emit "\{cur_end_tmp} = \{!(getEndWitness loc)};"
+          NoEW  => pure ()
+      {-
+      case ew_scrut of
+        EW    => emit "\{cur_tag_end_tmp} = \{!(getEndWitness locL)};"
+        NoEW  => pure ()
+      -}
+      --case mode of
+      --  FillDyn => emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expL)};"
+      --  ReadDyn => pure () -- TODO: what to do when it has end-witness?
       putStrLn " LEFT finished - 2"
-      pure (!writeResAndScrutEW, !(gets (.local)))
+      pure ({-!writeResAndScrutEW,-} !(gets (.local)))
 
     emit "} else { // RIGHT"
-    (scrut_ew_right, right_cglocal) <- indent $ localScope $ do
-      _ <- markAlreadyWritten locR $ allocCursor locR
-      let expR = cont_right Var
-      evalCGMode mode expR
+    ({-(has_res_cur_right, scrut_ew_right),-} right_cglocal) <- indent $ localScope $ do
       putStrLn " RIGHT finished - 1 \{mode}"
+      _ <- markAlreadyWritten locR $ allocCursorIfNeeded locR
+      --allocCursorIfNeeded
+      putStrLn " RIGHT finished - 2 \{mode}"
+      let expR = cont_right Var
+      putStrLn " RIGHT finished - 3 \{mode}"
+      evalCGMode mode expR
+      putStrLn " RIGHT finished - 4 \{mode}"
       -- Q: is this always needed or it depends on the mode?
-      case mode of
-        FillDyn => emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expR)};"
-        ReadDyn => pure () -- TODO: what to do when it has end-witness?
+      whenWritten loc $ do
+        emit "\{cur_res_tmp} = \{!(getCursor loc)};"
+        case ew of
+          EW    => emit "\{cur_end_tmp} = \{!(getEndWitness loc)};"
+          NoEW  => pure ()
+      {-
+      case ew_scrut of
+        EW    => emit "\{cur_tag_end_tmp} = \{!(getEndWitness locR)};"
+        NoEW  => pure ()
+      -}
+
+
+      --case ew_scrut of
+      --  EW    => emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expR)};"
+      --  NoEW  => pure ()
+      --case mode of
+      --  FillDyn => emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expR)};"
+      --  ReadDyn => pure () -- TODO: what to do when it has end-witness?
       putStrLn " RIGHT finished - 2"
-      pure (!writeResAndScrutEW, !(gets (.local)))
+      pure ({-!writeResAndScrutEW,-} !(gets (.local)))
     emit "}"
 
     modify { local.read   $= union (intersection left_cglocal.read  right_cglocal.read)
@@ -797,12 +835,30 @@ evalCont (CaseEither {a, b, loc_scrut} scrut cont_left cont_right) mode = do
     putStrLn "CaseEither - new locations left:\n\{ unlines . map show . Data.SortedSet.toList $ difference (fromList . keys $ left_cglocal.locations)  (fromList . keys $ cg.local.locations)}"
     putStrLn "CaseEither - new locations right:\n\{unlines . map show . Data.SortedSet.toList $ difference (fromList . keys $ right_cglocal.locations) (fromList . keys $ cg.local.locations)}"
     putStrLn "CaseEither - 1"
-    addCur cur_res_tmp loc
-    setEndWitness loc cur_end_tmp -- TODO: is this mode dependent? or is it also ew dependent? figure this out
+
+    {-
+    lookupCursor loc >>= \case
+      Just _  => do
+        addCur cur_res_tmp loc
+        setEndWitness loc cur_end_tmp -- TODO: is this mode dependent? or is it also ew dependent? figure this out
+      Nothing => emit "/* CaseEither - TODO: missing cursor for \{loc}*/"
+    -}
+    --when (has_res_cur_left && has_res_cur_right) $ do
+    --  addCur cur_res_tmp loc
+    whenWritten loc $ do
+      addCur cur_res_tmp loc
+      case ew of
+        EW    => setEndWitness loc cur_end_tmp -- TODO: is this mode dependent? or is it also ew dependent? figure this out
+        NoEW  => pure ()
+    {-
+    case ew_scrut of
+      EW    => setEndWitness loc_scrut cur_tag_end_tmp
+      NoEW  => pure ()
+    -}
     putStrLn "CaseEither - 2"
     -- add end-witness for loc_scrut ; this can be done when both left and right eliminator has it
-    when (scrut_ew_left && scrut_ew_right) $ do
-      defineEndWitness loc_scrut cur_tag_end_tmp "CaseEither - scrut"
+    --when (scrut_ew_left && scrut_ew_right) $ do
+    --  defineEndWitness loc_scrut cur_tag_end_tmp "CaseEither - scrut"
     putStrLn "CaseEither - 3"
 
 evalCont _ _ = assert_total $ idris_crash $ "evalCont TODO"
@@ -841,22 +897,23 @@ evalCont _ _ = assert_total $ idris_crash $ "evalCont TODO"
   RightEW               rdone
 -}
 
-readDyn (I64Cmp{})    = ensureWritten loc
-readDyn (I64Op2{})    = ensureWritten loc
-readDyn (MkI64{})     = ensureWritten loc
-readDyn (MkT0{})      = ensureWritten loc
-readDyn (MkPtr{})     = ensureWritten loc
-readDyn (MkOffset{})  = ensureWritten loc
-readDyn (MkRight{})   = ensureWritten loc
-readDyn (MkLeft{})    = ensureWritten loc
-readDyn (MkPair{})    = ensureWritten loc
-readDyn (Copy{})      = ensureWritten loc
-readDyn (Var{})       = ensureWritten loc
-readDyn (FunAppDef{}) = ensureWritten loc
-readDyn (FunApp{})    = ensureWritten loc
+-- Q: should we traverse this? maybe yes, probably yes, because read arguments may contain LetRegionValues
+readDyn (I64Cmp _ a b)= putStrLn " ++ I64Cmp (read)" >> readDyn a >> readDyn b
+readDyn (I64Op2 _ a b)= putStrLn " ++ I64Op2 (read)" >> readDyn a >> readDyn b
+readDyn (MkI64{})     = putStrLn " ++ MkI64 (read)"
+readDyn (MkT0{})      = putStrLn " ++ MkT0 (read)"
+readDyn (MkPtr a)     = putStrLn " ++ MkPtr (read)" >> readDyn a
+readDyn (MkOffset a)  = putStrLn " ++ MkOffset (read)" >> readDyn a
+readDyn (MkRight a)   = putStrLn " ++ MkRight (read)" >> readDyn a
+readDyn (MkLeft a)    = putStrLn " ++ MkLeft (read)" >> readDyn a
+readDyn (MkPair a b)  = putStrLn " ++ MkPair (read)" >> readDyn a >> readDyn b
+readDyn (Copy v)      = putStrLn " ++ Copy (read)" >> readDyn v
+readDyn (Var{})       = putStrLn " ++ Var (read)"
+readDyn (FunAppDef _ _ a) = putStrLn " ++ FunAppDef (read)" >> readArgs a
+readDyn (FunApp _ a)      = putStrLn " ++ FunApp (read)" >> readArgs a
 
-readDyn (MkBox v) = readDyn v
-readDyn (UnBox v) = readDyn v
+readDyn (MkBox v) = putStrLn " ++ MkBox (read)" >> readDyn v
+readDyn (UnBox v) = putStrLn " ++ UnBox (read)" >> readDyn v
 
 readDyn e@(LetRegionValue{}) = evalCont e ReadDyn
 readDyn e@(LetRegion{}) = evalCont e ReadDyn
@@ -908,9 +965,9 @@ readDyn (GenEW a) = do
     LocAfterTag "Right" _ loc_scrut => updateEndWitnessTo' loc_scrut loc
     _ => pure ()
 
-readDyn (PairEW {loc_tup} _ snd) = readDyn snd >> updateEndWitnessTo loc_tup snd
-readDyn (LeftEW  {loc_scrut} _ a) = readDyn a >> updateEndWitnessTo loc_scrut a
-readDyn (RightEW {loc_scrut} _ a) = readDyn a >> updateEndWitnessTo loc_scrut a
+readDyn (PairEW {loc_tup} _ snd) = putStrLn " ++ PairEW (read)" >> readDyn snd >> updateEndWitnessTo loc_tup snd
+readDyn (LeftEW  {loc_scrut} _ a) = putStrLn " ++ LeftEW (read)" >> readDyn a >> updateEndWitnessTo loc_scrut a
+readDyn (RightEW {loc_scrut} _ a) = putStrLn " ++ RightEW (read)" >> readDyn a >> updateEndWitnessTo loc_scrut a
 
 c_header : String
 c_header = """
@@ -953,12 +1010,12 @@ toBufferDyn {t} e = do
 partial public export
 compileProgram : String -> Program -> IO String
 compileProgram name (Main e) = do
-  let fname = name ++ ".c"
+  let fname = "test/\{name}.c"
   print $ background BrightRed " ---- CODEGEN \{fname} ----\n"
   src <- toBufferDyn e
   Right _ <- writeFile fname src
     | Left err => idris_crash (show err)
-  (c_msg, 0) <- run "gcc -O3 \{fname} -o \{name}"
+  (c_msg, 0) <- run "gcc -O3 \{fname} -o test/\{name}"
     | err => idris_crash (show err)
   putStrLn c_msg
   pure src
