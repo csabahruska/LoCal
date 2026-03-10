@@ -239,7 +239,7 @@ readExp (CaseEither {a, b} scrut l_cont r_cont) = do
   MkLoExp2 {r=l_r, loc=l_loc} l_cont_lo <- readExp $ l_cont $ Var l
   MkLoExp2 {r=r_r, loc=r_loc} r_cont_lo <- readExp $ r_cont $ Var r
   case decEq l_r r_r of
-    No _     => assert_total $ idris_crash "left - right region mismatch"
+    No _     => assert_total $ idris_crash "left - right region mismatch l_r: \{show l_r} r_r: \{show r_r}"
     Yes Refl => case decEq l_loc r_loc of
       No _     => assert_total $ idris_crash "left - right loc mismatch"
       Yes Refl => pure $ MkLoExp2 $ CaseEither scrut_lo (\l => l_cont_lo) (\r => r_cont_lo)
@@ -253,7 +253,7 @@ readExp (CasePair {a, b} tup cont) = do
   MkLoExp2 {loc=loc_tup} tup_lo <- readExp tup
   let ewFst = GenEW $ GetFst tup_lo
   addLoExp fst ewFst
-  addLoExp snd $ GetSnd tup_lo ewFst
+  addLoExp snd $ GenEW $ GetSnd tup_lo ewFst
   readExp $ cont (Var fst) (Var snd)
 
 readExp (Let v cont) = do
@@ -336,7 +336,7 @@ writeExp (CasePair {a, b} tup cont) = do
   MkLoExp2 {loc=loc_tup} tup_lo <- readExp tup
   let ewFst = GenEW $ GetFst tup_lo
   addLoExp fst ewFst
-  addLoExp snd $ GetSnd tup_lo ewFst
+  addLoExp snd $ GenEW $ GetSnd tup_lo ewFst
   writeExp $ cont (Var fst) (Var snd)
 
 writeExp (CaseEither {a, b} scrut l_cont r_cont) = do
