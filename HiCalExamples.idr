@@ -7,8 +7,8 @@ AddI64C i = I64Op2 Plus (MkI64 i)
 
 public export
 EqI64C, LtI64C : Int -> Exp I64 -> Exp (Either T0 T0)
-EqI64C i = I64Cmp EQ (MkI64 i)
-LtI64C i = I64Cmp LT (MkI64 i)
+EqI64C i e = I64Cmp EQ e (MkI64 i)
+LtI64C i e = I64Cmp LT e (MkI64 i)
 
 public export
 Rev_my_ty : Ty
@@ -177,6 +177,18 @@ test_14_bug_full = Main $
   PrintValue l1 $ \_ =>
   PrintValue l4 $ \_ =>
   Let (FunAppDef "printList" printList (ArgN l4 Arg0)) $ \_ => l4
+
+public export
+test_14_bug_full_unroll : Program -- this actually works
+test_14_bug_full_unroll = Main $
+  Let (MkI64 1) $ \i =>
+  Let (genList (ArgN i Arg0)) $ \l1 =>
+  Let (mapSuccList (ArgN l1 Arg0)) $ \l2 =>
+  Let (filterLt5List (ArgN l2 Arg0)) $ \l3 =>
+  let l4 = appendList (ArgN l3 $ ArgN l3 Arg0) in
+  PrintValue l1 $ \_ =>
+  PrintValue l4 $ \_ =>
+  Let (printList (ArgN l4 Arg0)) $ \_ => l4
 
 {-
 Main (

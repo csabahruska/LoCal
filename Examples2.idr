@@ -579,18 +579,19 @@ test_14_bug_unroll = Main $
   LetRegion $ \r =>
   LetRegionValue r (MkI64 1) $ \i =>
   LetRegion $ \r =>
-  --LetRegionValue r (MkRight MkT0) $ \l =>
+  --LetRegionValue r (MkRight MkT0) $ \l3 =>
   LetRegionValue r (genList_rev (ArgN {fun="genList_rev"} i Arg0)) $ \l1 =>
   LetRegion $ \r =>
   LetRegionValue r (mapSuccList_rev (ArgN {fun="mapSuccList_rev"} l1 Arg0)) $ \l2 =>
   LetRegion $ \r =>
   LetRegionValue r (filterLt5List_rev (ArgN {fun="filterLt5List_rev"} l2 Arg0)) $ \l3 =>
+  -- Q: what is the problem? is it that l3 is used twice in the arg list and the meta level does not guarantee arg distinction?
+  -- A: no
   let l4 = appendList_rev (ArgN {fun="appendList_rev"} l3 $ ArgN l3 Arg0) in
   PrintValue l1 $ \_ =>
   PrintValue l4 $ \_ =>
   LetRegion $ \r =>
   LetRegionValue r (printList_rev (ArgN {fun="printList_rev"} l4 Arg0)) $ \_ => l4
-
 
 test_12 : Program
 test_12 = Main $
@@ -751,9 +752,9 @@ test_bug01 = Main $
 
 partial main : IO ()
 main = do
+  _ <- compileProgram "test_14_bug_unroll" test_14_bug_unroll -- fixed
   _ <- compileProgram "test_bug01" test_bug01
   _ <- compileProgram "test_14_bug" test_14_bug
-  --_ <- compileProgram "test_14_bug_unroll" test_14_bug_unroll -- TODO: fix bug
   --putStr !(toBufferDyn sample_box_03)
   --putStr !(toBufferDyn sample_box_04)
   --putStr !(toBufferDyn sample_box_05)
