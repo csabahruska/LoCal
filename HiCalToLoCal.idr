@@ -139,7 +139,7 @@ compileCmpOp = \case
   NE  => NE
 
 compileExp : {t : _} -> {r : _} -> {loc : Loc r} -> Hi.Exp t -> M (Lo.Exp (compileTy t) loc EW [])
-writeExp   : {t : _} -> {r : _} -> {loc : Loc r} -> Hi.Exp t -> M (Lo.Exp (compileTy t) loc EW [])
+writeExp   : {t : _} -> {r : _} -> {loc : Loc r} -> Hi.Exp t -> M (Lo.Exp (compileTy t) loc W [])
 readExp    : {t : _} ->                             Hi.Exp t -> M (LoExp2 (compileTy t))
 
 {-

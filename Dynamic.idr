@@ -379,10 +379,10 @@ updateEndWitnessTo' loc loc2 = do
   modify {local.endwitness $= insert (show loc) ew}
   print $ colored BrightBlue " update endwitness to \{ew} for\n \{loc}\n\n"
 
-inheritEndWitness : {ew : _} -> {loc2 : Loc r2} -> (loc : Loc r) -> Exp _ loc2 ew _ -> M ()
-inheritEndWitness loc e = case ew of
-  NoEW => pure ()
-  EW   => updateEndWitnessTo loc e
+inheritEndWitness : {rw : _} -> {loc2 : Loc r2} -> (loc : Loc r) -> Exp _ loc2 rw _ -> M ()
+inheritEndWitness loc e = case rw of
+  R NoEW  => pure ()
+  _       => updateEndWitnessTo loc e
 
 addStaticSizeEndWitness : (loc : Loc r) -> String -> M ()
 addStaticSizeEndWitness l msg = do
@@ -422,17 +422,22 @@ Show EndWitness where
   show NoEW = "NoEW"
 Interpolation EndWitness where interpolate = show
 
-fillDyn  : {ew : _} -> {loc : _} -> Exp t loc ew _ -> M ()
-readDyn  : {ew : _} -> {loc : _} -> Exp t loc ew _ -> M ()
-evalCont : {ew : _} -> {loc : _} -> Exp t loc ew _ -> CGMode -> M ()
+Show RWMode where
+  show (R ew) = "(R \{ew})"
+  show W = "W"
+Interpolation RWMode where interpolate = show
 
-evalCGMode : CGMode -> {ew : _} -> {loc : Loc r} -> Exp t loc ew _ -> M ()
+partial fillDyn  : {rw : _} -> {loc : _} -> Exp t loc rw _ -> M ()
+partial readDyn  : {rw : _} -> {loc : _} -> Exp t loc rw _ -> M ()
+partial evalCont : {rw : _} -> {loc : _} -> Exp t loc rw _ -> CGMode -> M ()
+
+partial evalCGMode : CGMode -> {rw : _} -> {loc : Loc r} -> Exp t loc rw _ -> M ()
 evalCGMode FillDyn = fillDyn
 evalCGMode ReadDyn = readDyn
 
 -- traversal
 
-genEW : {r : _} -> {loc : Loc r} -> {t : _} -> {ew : _} -> Exp t loc ew [] -> Exp t loc EW []
+genEW : {r : _} -> {loc : Loc r} -> {t : _} -> {ew : _} -> Exp t loc (R ew) [] -> Exp t loc REW []
 genEW {ew=EW} e = e
 genEW {ew=NoEW} e with (decEq True $ isStaticSize t)
   genEW e | Yes p                   = StaticEW {prf = p} e
@@ -442,7 +447,7 @@ genEW {ew=NoEW} e with (decEq True $ isStaticSize t)
     genEW e | _ | Box n (Delay tbx) = MkBox $ GenEW $ UnBox e
     genEW _ | _ | t2                = assert_total $ idris_crash $ "genEW for type \{t} - sub type: \{t2}"
 
-genTraversalEW : {r : _} -> {loc : Loc r} -> {t : _} -> {ew : _} -> Exp t loc ew [] -> M String
+genTraversalEW : {r : _} -> {loc : Loc r} -> {t : _} -> {ew : _} -> Exp t loc (R ew) [] -> M String
 genTraversalEW e = do
   let key = show t
   when (isJust $ getStaticSize t) $ assert_total $ idris_crash $ "traverseLoc for static size: \{t}"
@@ -757,7 +762,7 @@ evalCont (DeRefPtr {x, r_in, loc_in} v cont) mode = do
     evalCGMode mode (cont {r_val} Var)
 
 evalCont (CaseEither {a, b, loc_scrut, ew_scrut} scrut cont_left cont_right) mode = do
-  lift $ putStrLn " ++ CaseEither scrut: \{loc_scrut} \{ew_scrut} \{mode} loc: \{loc} \{ew}"
+  lift $ putStrLn " ++ CaseEither scrut: \{loc_scrut} \{ew_scrut} \{mode} loc: \{loc} \{rw}"
   readDyn scrut
   getWrittenCursor loc_scrut $ \cur_tag => do
     lift $ putStrLn " ++ CaseEither \{loc_scrut} - 1  \{mode}"
@@ -783,9 +788,9 @@ evalCont (CaseEither {a, b, loc_scrut, ew_scrut} scrut cont_left cont_right) mod
       -- Q: is this always needed or it depends on the mode?
       whenWritten loc $ do
         emit "\{cur_res_tmp} = \{!(getCursor loc)};"
-        case ew of
-          EW    => emit "\{cur_end_tmp} = \{!(getEndWitness loc)};"
-          NoEW  => pure ()
+        case rw of
+          R NoEW => pure ()
+          _      => emit "\{cur_end_tmp} = \{!(getEndWitness loc)};"
       {-
       case ew_scrut of
         EW    => emit "\{cur_tag_end_tmp} = \{!(getEndWitness locL)};"
@@ -811,9 +816,9 @@ evalCont (CaseEither {a, b, loc_scrut, ew_scrut} scrut cont_left cont_right) mod
       -- Q: is this always needed or it depends on the mode?
       whenWritten loc $ do
         emit "\{cur_res_tmp} = \{!(getCursor loc)};"
-        case ew of
-          EW    => emit "\{cur_end_tmp} = \{!(getEndWitness loc)};"
-          NoEW  => pure ()
+        case rw of
+          R NoEW => pure ()
+          _      => emit "\{cur_end_tmp} = \{!(getEndWitness loc)};"
       {-
       case ew_scrut of
         EW    => emit "\{cur_tag_end_tmp} = \{!(getEndWitness locR)};"
@@ -855,9 +860,9 @@ evalCont (CaseEither {a, b, loc_scrut, ew_scrut} scrut cont_left cont_right) mod
     --  addCur cur_res_tmp loc
     whenWritten loc $ do
       addCur cur_res_tmp loc
-      case ew of
-        EW    => setEndWitness loc cur_end_tmp -- TODO: is this mode dependent? or is it also ew dependent? figure this out
-        NoEW  => pure ()
+      case rw of
+        R NoEW => pure ()
+        _     => setEndWitness loc cur_end_tmp -- TODO: is this mode dependent? or is it also ew dependent? figure this out
     {-
     case ew_scrut of
       EW    => setEndWitness loc_scrut cur_tag_end_tmp
@@ -1001,19 +1006,20 @@ c_header = """
 
   """
 
-public export
-toBufferDyn : {t : _} -> Exp t (LocStart t (MkRegion (-1))) EW [] -> IO String
+public export partial
+toBufferDyn : {t : _} -> Exp t (LocStart t (MkRegion (-1))) REW [] -> IO String
 toBufferDyn {t} e = do
   print $ background Yellow " ---- CODEGEN ----\n"
   putStrLn ""
   s <- execStateT emptyCG $ do
     genFunction "main" $ do
       emit "void main() {"
-      indent $ readDyn $ LetRegionValue (MkRegion (-1)) e id
+      indent $ readDyn e
       assertNoActionsLeft
       emit "}"
   putStrLn " ---- CODE OUTPUT ----"
   pure $ unlines $ c_header :: [unlines (reverse funLines) | funLines <- s.decls :: values s.code]
+
 
 partial public export
 compileProgram : String -> Program -> IO String

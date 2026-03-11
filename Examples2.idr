@@ -14,7 +14,7 @@ export infixr 5 ##
 (##) : {a, b : Ty} -> {loc : _} ->
     let locFst = LocAfterTag "Pair" a loc in
     let locSnd = LocAfter b locFst in
-    Exp a locFst EW [] -> Exp b locSnd EW [] -> Exp (Pair a b) loc EW []
+    Exp a locFst W [] -> Exp b locSnd W [] -> Exp (Pair a b) loc W []
 
 (##) = MkPair
 
@@ -32,7 +32,7 @@ sample_tup2_02 = let a = MkI64 102 in a ## MkOffset a ## a ## MkI64 103
 -}
 
 -- TODO: codegen this
-sample_tup2_03 : {r : _} -> {loc : Loc r} -> Exp (I64 # Offset I64 # I64 # I64) loc EW []
+sample_tup2_03 : {r : _} -> {loc : Loc r} -> Exp (I64 # Offset I64 # I64 # I64) loc W []
 sample_tup2_03 = let a = MkI64 102 in MkPair (Copy a) $ MkPair (MkOffset a) $ MkPair ( a) $ MkI64 103
 {-
 sample_tup2_03_err : {r : _} -> {loc : Loc r} -> Exp (I64 # Offset I64 # I64 # I64) loc EW
@@ -439,7 +439,7 @@ test_11 =
       FunApp "printList" (printList 2) l $ \l =>
       l
 -}
-covering
+
 mapSuccList_rev : {ew : _} -> {r_out : _} -> {loc_out : Loc r_out} ->
               Arg [Exp Rev_my_ty loc_in ew []] -> Exp Rev_my_ty loc_out EW []
 mapSuccList_rev (ArgN a Arg0) =
