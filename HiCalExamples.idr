@@ -27,6 +27,7 @@ genList : Arg [Exp I64] -> Exp Rev_my_ty
 genList (ArgN i Arg0) =
   CaseEither (EqI64C 10 i)
     (\f => MkLeft $ MkPair (MkBox $ FunAppDef "genList" genList (ArgN (AddI64C 1 i) Arg0)) i)
+    --(\f => MkLeft $ MkPair (MkBox $ MkRight MkT0) (AddI64C 1 i))
     (\t => MkRight MkT0)
 
 printList : Arg [Exp Rev_my_ty] -> Exp T0
@@ -182,14 +183,16 @@ public export
 test_14_bug_full_unroll : Program -- this actually works
 test_14_bug_full_unroll = Main $
   Let (MkI64 1) $ \i =>
-  Let (genList (ArgN i Arg0)) $ \l1 =>
-  Let (mapSuccList (ArgN l1 Arg0)) $ \l2 =>
-  Let (filterLt5List (ArgN l2 Arg0)) $ \l3 =>
-  let l4 = appendList (ArgN l3 $ ArgN l3 Arg0) in
-  PrintValue l1 $ \_ =>
-  PrintValue l4 $ \_ =>
-  Let (printList (ArgN l4 Arg0)) $ \_ => l4
-
+  --let i = (MkI64 1) in -- $ \i =>
+  --Let (genList (ArgN i Arg0)) $ \l1 =>
+  let l1 = genList (ArgN i Arg0) in
+  --Let (mapSuccList (ArgN l1 Arg0)) $ \l2 =>
+  --Let (filterLt5List (ArgN l2 Arg0)) $ \l3 =>
+  --let l4 = appendList (ArgN l3 $ ArgN l3 Arg0) in
+  --PrintValue l1 $ \_ =>
+  --PrintValue l4 $ \_ =>
+  --Let (printList (ArgN l4 Arg0)) $ \_ => l4
+  l1
 {-
 Main (
   LetRegionValue (MkRegion 1) (MkRight MkT0) (\_ =>
@@ -379,4 +382,60 @@ Main
                                   {t = Pair (Box "Rev_my_ty" Rev_my_ty) I64})))
                           )))) (\_ : Exp {r = MkArgRegion "mapSuccList" 0} T0 (LocAfterTag {r = MkArgRegion "mapSuccList" 0} "Right" T0 (LocStart (Either (Pair (Box "Rev_my_ty" Rev_my_ty) I64) T0) (MkArgRegion "mapSuccList" 0))) EW ([] {a = Type}) =>
 MkRight {{r:2609} = MkRegion -1} {a = Pair (Box "Rev_my_ty" Rev_my_ty) I64} {b = T0} {loc = LocStart (Either (Pair (Box "Rev_my_ty" Rev_my_ty) I64) T0) (MkRegion -1)} (MkT0 {{r:3027} = MkRegion -1} {loc = LocAfterTag {r = MkRegion -1} "Right" T0 (LocStart (Either (Pair (Box "Rev_my_ty" Rev_my_ty) I64) T0) (MkRegion -1))}))) (ArgN {s = [] {a = Type}} {fun = "mapSuccList"} {n = 0} {t = Either (Pair (Box "Rev_my_ty" Rev_my_ty) I64) T0} {r_arg = MkRegion 1} {loc_arg = LocStart (Either (Pair (Box "Rev_my_ty" Rev_my_ty) I64) T0) (MkRegion 1)} {ew = EW} (Var {{r:3205} = MkRegion 1} {sew = [] {a = Type}} {ew = EW} {loc = LocStart (Either (Pair (Box "Rev_my_ty" Rev_my_ty) I64) T0) (MkRegion 1)} {t = Either (Pair (Box "Rev_my_ty" Rev_my_ty) I64) T0}) (Arg0 {fun = "mapSuccList"}))))
+-}
+public export
+test_bug3 : Program
+test_bug3 = Main $ PrintValue
+  (CaseEither {a=T0} (MkRight MkT0) (\_ => MkT0) (\_ => MkT0)) $ \_ =>
+  MkT0
+
+{-
+Main (LetRegionValue (MkRegion 2)
+  (CaseEither (LetRegionValue (MkRegion 5) (I64Cmp EQ Var (LetRegionValue (MkRegion 7) (MkI64 10) (\_ => Var))) (\_ => Var))
+    (\_ =>
+      MkLeft (MkPair (MkBox (FunAppDef "genList" (\_ =>
+        CaseEither (LetRegionValue (MkRegion 14) (I64Cmp EQ Var (LetRegionValue (MkRegion 15) (MkI64 10) (\_ => Var))) (\_ => Var))
+          (\_ => MkLeft (MkPair (MkBox (FunApp "genList" (ArgN (LetRegionValue (MkRegion 17) (I64Op2 Plus (LetRegionValue (MkRegion 18) (MkI64 1) (\_ => Var)) Var) (\_ =>
+                  Var)) Arg0))) (Copy Var)))
+          (\_ => MkRight MkT0))
+        (ArgN (LetRegionValue (MkRegion 9) (I64Op2 Plus (LetRegionValue (MkRegion 10) (MkI64 1) (\_ => Var)) Var) (\_ => Var)) Arg0))) (MkI64 1)))
+    (\_ => MkRight MkT0))
+
+  (\_ => LetRegionValue (MkRegion 20) (CaseEither Var (\_ => MkLeft (MkPair (MkBox (FunAppDef "mapSuccList" (\_ => CaseEither Var (\_ =>
+MkLeft (MkPair (MkBox (FunApp "mapSuccList" (ArgN (UnBox (GenEW (GetFst Var))) Arg0))) (I64Op2 Plus (LetRegionValue (MkRegion 31) (MkI64 1) (\_ =>
+Var)) (GenEW (GetSnd Var (GenEW (GetFst Var))))))) (\_ => MkRight MkT0)) (ArgN (UnBox (GenEW (GetFst Var))) Arg0))) (I64Op2 Plus (LetRegionValue (MkRegion 32) (MkI64 1) (\_ =>
+Var)) (GenEW (GetSnd Var (GenEW (GetFst Var))))))) (\_ => MkRight MkT0)) (\_ => LetRegionValue (MkRegion 34) (CaseEither Var (\_ =>
+CaseEither (LetRegionValue (MkRegion 41) (I64Cmp LT (GenEW (GetSnd Var (GenEW (GetFst Var)))) (LetRegionValue (MkRegion 42) (MkI64 5) (\_ => Var))) (\_ => Var)) (\_ =>
+FunAppDef "filterLt5List" (\_ => CaseEither Var (\_ =>
+CaseEither (LetRegionValue (MkRegion 50) (I64Cmp LT (GenEW (GetSnd Var (GenEW (GetFst Var)))) (LetRegionValue (MkRegion 51) (MkI64 5) (\_ => Var))) (\_ => Var)) (\_ =>
+FunApp "filterLt5List" (ArgN (UnBox (GenEW (GetFst Var))) Arg0)) (\_ =>
+MkLeft (MkPair (MkBox (FunApp "filterLt5List" (ArgN (UnBox (GenEW (GetFst Var))) Arg0))) (Copy (GenEW (GetSnd Var (GenEW (GetFst Var)))))))) (\_ =>
+MkRight MkT0)) (ArgN (UnBox (GenEW (GetFst Var))) Arg0)) (\_ =>
+MkLeft (MkPair (MkBox (FunApp "filterLt5List" (ArgN (UnBox (GenEW (GetFst Var))) Arg0))) (Copy (GenEW (GetSnd Var (GenEW (GetFst Var)))))))) (\_ => MkRight MkT0)) (\_ =>
+PrintValue Var (\_ => PrintValue (LetRegionValue (MkRegion 112) (CaseEither Var (\_ =>
+MkLeft (MkPair (MkBox (FunApp "appendList" (ArgN (UnBox (GenEW (GetFst Var))) (ArgN Var Arg0)))) (Copy (GenEW (GetSnd Var (GenEW (GetFst Var))))))) (\_ =>
+FunApp "copyList" (ArgN Var Arg0))) (\_ => Var)) (\_ => LetRegionValue (MkRegion 56) (CaseEither (LetRegionValue (MkRegion 80) (CaseEither Var (\_ =>
+MkLeft (MkPair (MkBox (FunApp "appendList" (ArgN (UnBox (GenEW (GetFst Var))) (ArgN Var Arg0)))) (Copy (GenEW (GetSnd Var (GenEW (GetFst Var))))))) (\_ =>
+FunApp "copyList" (ArgN Var Arg0))) (\_ => Var)) (\_ => PrintI64 (GenEW (GetSnd Var (GenEW (GetFst Var)))) (\_ => FunAppDef "printList" (\_ => CaseEither Var (\_ =>
+PrintI64 (GenEW (GetSnd Var (GenEW (GetFst Var)))) (\_ => FunApp "printList" (ArgN (UnBox (GenEW (GetFst Var))) Arg0))) (\_ => MkT0)) (ArgN (UnBox (GenEW (GetFst Var))) Arg0))) (\_ =>
+MkT0)) (\_ => CaseEither Var (\_ =>
+MkLeft (MkPair (MkBox (FunApp "appendList" (ArgN (UnBox (GenEW (GetFst Var))) (ArgN Var Arg0)))) (Copy (GenEW (GetSnd Var (GenEW (GetFst Var))))))) (\_ =>
+FunApp "copyList" (ArgN Var Arg0)))))))))
+
+-}
+
+
+
+
+{-
+Main (
+  CaseEither (LetRegionValue (MkRegion 3) (I64Cmp EQ Var (LetRegionValue (MkRegion 5) (MkI64 10) (\_ => Var))) (\_ => Var))
+    (\_ => MkLeft (MkPair (MkBox
+            (FunAppDef "genList" (\_ => CaseEither (LetRegionValue (MkRegion 12) (I64Cmp EQ Var (LetRegionValue (MkRegion 13) (MkI64 10) (\_ => Var))) (\_ => Var)) (\_ =>
+              MkLeft (MkPair (MkBox (FunApp "genList" (ArgN (LetRegionValue (MkRegion 15) (I64Op2 Plus (LetRegionValue (MkRegion 16) (MkI64 1) (\_ => Var)) Var) (\_ =>
+              Var)) Arg0))) (Copy Var))) (\_ => MkRight MkT0)) (ArgN (LetRegionValue (MkRegion 7) (I64Op2 Plus (LetRegionValue (MkRegion 8) (MkI64 1) (\_ => Var)) Var) (\_ =>
+              Var)) Arg0))
+            ) (MkI64 1)))
+    (\_ => MkRight MkT0))
+
 -}

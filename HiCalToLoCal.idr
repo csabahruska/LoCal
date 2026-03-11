@@ -140,6 +140,7 @@ compileCmpOp = \case
 
 compileExp : {t : _} -> {r : _} -> {loc : Loc r} -> Hi.Exp t -> M (Lo.Exp (compileTy t) loc EW [])
 writeExp   : {t : _} -> {r : _} -> {loc : Loc r} -> Hi.Exp t -> M (Lo.Exp (compileTy t) loc EW [])
+readExp    : {t : _} ->                             Hi.Exp t -> M (LoExp2 (compileTy t))
 
 {-
   IDEA:
@@ -184,7 +185,6 @@ allocInNewRegion e = do
   traceM "allocInNewRegion \{show r}"
   pure $ MkLoExp2 $ LetRegionValue r le id
 
-readExp : {t : _} -> Hi.Exp t -> M (LoExp2 (compileTy t))
 readExp (Var i) = lookupLoExp i >>= \case
   -- HINT: get location for an already written value
   Just (MkLoExp {t=t_lo} le) =>
@@ -226,7 +226,7 @@ readExp (PrintI64 a cont) = do
   MkLoExp2 cont_lo <- readExp $ cont ()
   pure $ MkLoExp2 $ PrintI64 a_lo (\_ => cont_lo)
 
-readExp (CaseEither {a, b} scrut l_cont r_cont) = do
+readExp hiexp@(CaseEither {a, b} scrut l_cont r_cont) = do
   l <- newId
   r <- newId
       -- TODO: save these vars for substitution on the recovery pass
@@ -239,10 +239,14 @@ readExp (CaseEither {a, b} scrut l_cont r_cont) = do
   MkLoExp2 {r=l_r, loc=l_loc} l_cont_lo <- readExp $ l_cont $ Var l
   MkLoExp2 {r=r_r, loc=r_loc} r_cont_lo <- readExp $ r_cont $ Var r
   case decEq l_r r_r of
-    No _     => assert_total $ idris_crash "left - right region mismatch l_r: \{show l_r} r_r: \{show r_r}"
     Yes Refl => case decEq l_loc r_loc of
-      No _     => assert_total $ idris_crash "left - right loc mismatch"
       Yes Refl => pure $ MkLoExp2 $ CaseEither scrut_lo (\l => l_cont_lo) (\r => r_cont_lo)
+      No _     => assert_total $ idris_crash "left - right loc mismatch"
+    No _ => allocInNewRegion hiexp -- : {t : _} -> Hi.Exp t -> M (LoExp2 (compileTy t))
+
+      --r_cont_lo <- writeExp {r=l_r, loc=l_loc} $ r_cont $ Var r
+      --pure $ MkLoExp2 $ CaseEither scrut_lo (\l => l_cont_lo) (\r => LetRegionValue l_r r_cont_lo id)
+      --assert_total $ idris_crash "left - right region mismatch l_r: \{show l_r} r_r: \{show r_r}"
 
 readExp (CasePair {a, b} tup cont) = do
   fst <- newId

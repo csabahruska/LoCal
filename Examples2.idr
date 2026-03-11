@@ -689,6 +689,21 @@ public export
 ListInt_Rev : Ty
 ListInt_Rev = Either (Pair (Box "ListInt_Rev" ListInt_Rev) I64) T0
 
+genListInt_Rev : {r_out : _} -> {loc_out : Loc r_out} -> Arg [Exp I64 loc_in EW []] -> Exp ListInt_Rev loc_out EW []
+genListInt_Rev (ArgN i Arg0) =
+  LetRegion $ \r =>
+  LetRegionValue r (EqI64C 10 i) $ \b =>
+  CaseEither b
+    (\f =>
+        LetRegion $ \r =>
+        LetRegionValue r (AddI64C 1 i) $ \next =>
+        -- working
+        let res = FunAppDef "genListInt_Rev" genListInt_Rev (ArgN next Arg0) in
+        --FunApp "genList_rev" genList_rev next $ \res =>
+        MkLeft $ let j = Copy $ StaticEW i in MkPair (MkBox res) j
+    )
+    (\t => MkRight MkT0)
+
 mapSuccListInt_Rev : {ew : _} -> {r_out : _} -> {loc_out : Loc r_out} -> Arg [Exp ListInt_Rev loc_in ew []] -> Exp ListInt_Rev loc_out EW []
 mapSuccListInt_Rev (ArgN a Arg0) =
   CaseEither a
@@ -750,11 +765,64 @@ test_bug01 = Main $
   let x = FunAppDef "mapSuccListInt_Rev" mapSuccListInt_Rev (ArgN l Arg0) in
   PrintValue x $ \_ => x
 
+
+test_bug02 : Program
+test_bug02 = Main {res=ListInt_Rev}
+  (let i1 = MkI64 1 in
+  CaseEither
+    (LetRegionValue (MkRegion 10003)
+      (I64Cmp EQ i1 (LetRegionValue (MkRegion 10005) (MkI64 10) (\x => x)))
+      (\y => y))
+    (\_ => MkLeft $ MkPair (MkBox $ MkRight MkT0) i1)
+    (\_ => MkRight MkT0)
+  )
+
+test_bug03 : Program
+test_bug03 = Main {res=ListInt_Rev}
+  (let i1 = MkI64 1 in
+  CaseEither
+    (LetRegionValue (MkRegion 10003)
+      (I64Cmp EQ i1 i1)
+      (\y => y))
+    (\_ => MkLeft $ MkPair (MkBox $ MkRight MkT0) i1)
+    (\_ => MkRight MkT0)
+  )
+
+test_bug04 : Program
+test_bug04 = Main
+  (let i1 = MkI64 1 in
+  CaseEither {c=Either I64 T0} (LetRegionValue (MkRegion 10003) (I64Cmp EQ i1 i1) (\y => y))
+    (\_ => MkLeft i1)
+    (\_ => MkRight MkT0)
+  )
+
+-- Q: what is the interpretation of this?
+-- Q: how to resolve this?
+test_bug05 : Program
+test_bug05 = Main
+  (let i1 = MkRight MkT0 in
+  CaseEither {c=Either I64 T0} (LetRegionValue (MkRegion 10003) (Copy i1) (\y => y))
+    (\_ => i1)
+    (\_ => i1)
+  )
+
+test_bug06 : Program
+test_bug06 = Main
+  (let i1 = MkI64 12 in
+  PrintValue (LetRegionValue (MkRegion 10003) (Copy i1) (\y => y))
+    (\_ => i1)
+  )
+
 partial main : IO ()
 main = do
-  _ <- compileProgram "test_14_bug_unroll" test_14_bug_unroll -- fixed
-  _ <- compileProgram "test_bug01" test_bug01
-  _ <- compileProgram "test_14_bug" test_14_bug
+  _ <- compileProgram "test_bug06" test_bug06
+  --_ <- compileProgram "test_bug05" test_bug05
+  --_ <- compileProgram "test_bug04" test_bug04
+  --_ <- compileProgram "test_bug03" test_bug03
+  --_ <- compileProgram "test_bug02" test_bug02
+  --_ <- compileProgram "test_14_bug_unroll" test_14_bug_unroll -- fixed
+  --_ <- compileProgram "test_bug01" test_bug01
+  --_ <- compileProgram "test_14_bug" test_14_bug
   --putStr !(toBufferDyn sample_box_03)
   --putStr !(toBufferDyn sample_box_04)
   --putStr !(toBufferDyn sample_box_05)

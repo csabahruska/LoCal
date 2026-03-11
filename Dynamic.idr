@@ -108,8 +108,8 @@ emptyCG = MkCG
   }
 
 debug : M () -> M ()
---debug a = a
-debug _ = pure ()
+debug a = a
+--debug _ = pure ()
 
 printSrc : M ()
 printSrc = do
@@ -141,15 +141,16 @@ runWriteActions loc = do
 
 assertNoActionsLeft : M ()
 assertNoActionsLeft = do
-  wActs <- gets (.local.writeActions)
-  unless (null wActs) $ do
-    assert_total $ idris_crash $ "pending write actions for: \{unlines (keys wActs)}"
+  cg <- get
+  unless (null cg.local.writeActions) $ do
+    printSrc
+    assert_total $ idris_crash $ "pending write actions for locations:\n\{unlines (keys cg.local.writeActions)}\nwritten locations:\n\{unlines (Prelude.toList cg.local.write)}"
 
 listPendingActions : M ()
 listPendingActions = do
-  wActs <- gets (.local.writeActions)
-  unless (null wActs) $ do
-    putStrLn $ "pending write actions for: \{unlines (keys wActs)}"
+  cg <- get
+  unless (null cg.local.writeActions) $ do
+    putStrLn $ "pending write actions for locations:\n\{unlines (keys cg.local.writeActions)}\nwritten locations:\n\{unlines (Prelude.toList cg.local.write)}"
 
 assertRead : Loc r -> M ()
 assertRead loc = do
@@ -539,7 +540,7 @@ fillDyn (MkLeft arg) = do
   fillDyn arg
   inheritEndWitness loc arg
   getWrittenCursor (getLoc arg) $ \_ => do
-    putStrLn " ++ MkLeft - 1"
+    putStrLn " ++ MkLeft - 1 - markWrite \{loc}"
     markWrite loc $ pure ()
 
 fillDyn (MkRight arg) = do
@@ -549,7 +550,7 @@ fillDyn (MkRight arg) = do
   fillDyn arg
   inheritEndWitness loc arg
   getWrittenCursor (getLoc arg) $ \_ => do
-    putStrLn " ++ MkRight - 1"
+    putStrLn " ++ MkRight - 1 - markWrite \{loc}"
     markWrite loc $ pure ()
 
 -- primops
@@ -710,7 +711,7 @@ evalCont (PrintI64 {loc_in} v cont) mode = do
   getWrittenCursor loc_in $ \cur_in => do
     putStrLn " ++ PrintI64 (read) - 1"
     emit "printf(\"%d\\n\", *(int*) \{cur_in});"
-  evalCGMode mode $ cont ()
+    evalCGMode mode $ cont ()
 
 evalCont (PrintValue {loc_in} v cont) mode = do
   putStrLn " ++ PrintValue (read) - \{showLoExpTag v} loc: \{loc_in}"
@@ -720,8 +721,8 @@ evalCont (PrintValue {loc_in} v cont) mode = do
     putStrLn " ++ PrintValue (read) - 1"
     cur_end <- getEndWitness loc_in
     emit "print_hex(\{cur_in}, \{cur_end} - \{cur_in});"
-  putStrLn " ++ PrintValue (read) - 0 - 1"
-  evalCGMode mode $ cont ()
+    putStrLn " ++ PrintValue (read) - 0 - 1"
+    evalCGMode mode $ cont ()
 
 evalCont (DeRefOffset {x, r_in, loc_in} v cont) mode = do
   putStrLn " ++ DeRefPtr (read)"
@@ -794,6 +795,7 @@ evalCont (CaseEither {a, b, loc_scrut, ew_scrut} scrut cont_left cont_right) mod
       --  FillDyn => emit "\{cur_end_tmp} = \{!(getEndWitness $ getLoc expL)};"
       --  ReadDyn => pure () -- TODO: what to do when it has end-witness?
       putStrLn " LEFT finished - 2"
+      --getWrittenCursor (getLoc expL) $ \_ => do
       pure ({-!writeResAndScrutEW,-} !(gets (.local)))
 
     emit "} else { // RIGHT"
@@ -828,9 +830,15 @@ evalCont (CaseEither {a, b, loc_scrut, ew_scrut} scrut cont_left cont_right) mod
       putStrLn " RIGHT finished - 2"
       pure ({-!writeResAndScrutEW,-} !(gets (.local)))
     emit "}"
+    case mode of
+      FillDyn => markWrite loc $ pure ()
+      ReadDyn => pure ()
 
+    --modify { local.read   $= union (intersection left_cglocal.read  right_cglocal.read)
+    --       , local.write  $= union (intersection left_cglocal.write right_cglocal.write)
+     --      }
     modify { local.read   $= union (intersection left_cglocal.read  right_cglocal.read)
-           , local.write  $= union (intersection left_cglocal.write right_cglocal.write)
+           , local.write  $= union (union left_cglocal.write right_cglocal.write)
            }
     putStrLn "CaseEither - new locations left:\n\{ unlines . map show . Data.SortedSet.toList $ difference (fromList . keys $ left_cglocal.locations)  (fromList . keys $ cg.local.locations)}"
     putStrLn "CaseEither - new locations right:\n\{unlines . map show . Data.SortedSet.toList $ difference (fromList . keys $ right_cglocal.locations) (fromList . keys $ cg.local.locations)}"
