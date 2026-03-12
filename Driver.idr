@@ -23,6 +23,7 @@ test14_bug2 = Hi.compileProgram test_14_bug2
 test14_bug_full = Hi.compileProgram test_14_bug_full
 test14_bug_full_unroll = Hi.compileProgram test_14_bug_full_unroll
 test_bug3_lo = Hi.compileProgram test_bug3
+bug01_lo = Hi.compileProgram bug01
 
 {-
   Main {res = Pair I64 I64}
@@ -39,20 +40,18 @@ test_bug3_lo = Hi.compileProgram test_bug3
 partial main : IO ()
 main = do
   putStrLn "starting.."
-  --_ <- Lo.compileProgram "hi_test_bug3" test_bug3_lo
-  _ <- Lo.compileProgram "hi_test14_bug_full_unroll" test14_bug_full_unroll -- TODO: fix bug
-  {-
-  --_ <- Lo.compileProgram "hi_test01-dummy" $ Main MkT0
+  _ <- Lo.compileProgram "hi_bug01" bug01_lo -- TODO: fix bug: some FunAppDef-s are lost and turned to FunApp???
+  _ <- Lo.compileProgram "hi_test14_bug_full_unroll" test14_bug_full_unroll -- TODO: fix bug: some FunAppDef-s are lost and turned to FunApp???
 
-  --_ <- Lo.compileProgram "hi_test14_bug_full_unroll" test14_bug_full_unroll -- TODO: fix bug
+  _ <- Lo.compileProgram "hi_test_bug3" test_bug3_lo
   _ <- Lo.compileProgram "hi_test14_bug_full" test14_bug_full -- fixed
 
-  _ <- Lo.compileProgram "hi_test00" test0
   _ <- Lo.compileProgram "hi_test01" test1
-  _ <- Lo.compileProgram "hi_test02" test2
   _ <- Lo.compileProgram "hi_test03" test3
   _ <- Lo.compileProgram "hi_test04" test4
 
+  _ <- Lo.compileProgram "hi_test00" test0
+  _ <- Lo.compileProgram "hi_test02" test2
 
   _ <- Lo.compileProgram "hi_test12_bug" test12_bug -- fixed
   _ <- Lo.compileProgram "hi_test12" test12
@@ -61,5 +60,5 @@ main = do
   _ <- Lo.compileProgram "hi_test13_unroll_bug" test13_unroll -- fixed
   _ <- Lo.compileProgram "hi_test14_bug" test14_bug -- fixed
   _ <- Lo.compileProgram "hi_test14_bug2" test14_bug2 -- fixed
-  -}
+
   pure ()

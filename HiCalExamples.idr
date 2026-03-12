@@ -180,19 +180,26 @@ test_14_bug_full = Main $
   Let (FunAppDef "printList" printList (ArgN l4 Arg0)) $ \_ => l4
 
 public export
+bug01 : Program -- this actually works
+bug01 =
+  Main $
+  let l3 = MkRight MkT0 in
+  let l4 = copyList (ArgN l3 Arg0) in
+  PrintValue l4 $ \_ => MkT0
+
+
+public export
 test_14_bug_full_unroll : Program -- this actually works
 test_14_bug_full_unroll = Main $
   Let (MkI64 1) $ \i =>
-  --let i = (MkI64 1) in -- $ \i =>
-  --Let (genList (ArgN i Arg0)) $ \l1 =>
-  let l1 = genList (ArgN i Arg0) in
-  --Let (mapSuccList (ArgN l1 Arg0)) $ \l2 =>
-  --Let (filterLt5List (ArgN l2 Arg0)) $ \l3 =>
-  --let l4 = appendList (ArgN l3 $ ArgN l3 Arg0) in
-  --PrintValue l1 $ \_ =>
-  --PrintValue l4 $ \_ =>
-  --Let (printList (ArgN l4 Arg0)) $ \_ => l4
-  l1
+  Let (genList (ArgN i Arg0)) $ \l1 =>
+  Let (mapSuccList (ArgN l1 Arg0)) $ \l2 =>
+  Let (filterLt5List (ArgN l2 Arg0)) $ \l3 =>
+  let l4 = appendList (ArgN l3 $ ArgN l3 Arg0) in
+  PrintValue l1 $ \_ =>
+  PrintValue l4 $ \_ =>
+  Let (printList (ArgN l4 Arg0)) $ \_ => l4
+
 {-
 Main (
   LetRegionValue (MkRegion 1) (MkRight MkT0) (\_ =>
