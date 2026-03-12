@@ -44,20 +44,6 @@ getLocTy (LocAfterTag _ t _) = t
 getLocRegion : {r : _} -> Loc r -> Region
 getLocRegion {r} _ = r
 
--- TODO: return: relative base value and static offset, and the required runtime end witnesses
-getStaticIndex : Loc r -> Maybe Int
-getStaticIndex = \case
-  LocStart _ _ => Just 0
-  LocAfter _ l => do
-    i <- getStaticIndex l
-    s <- getStaticSize (getLocTy l)
-    Just (i + s)
-  LocAfterTag "Pair" _ l => do
-    getStaticIndex l
-  LocAfterTag _ _ l => do
-    i <- getStaticIndex l
-    Just (1 + i)
-
 -- codegen monad
 
 record CG
@@ -325,25 +311,24 @@ allocCursor loc = markAlloc loc $ case lookup (show loc) !(gets (.local.prealloc
     let newCur = do
           c <- newCursorName
           print $ colored BrightRed " !! add cursor \{c} :=\n \{loc}\n\n"
-          print $ colored BrightMagenta " !! static index \{c} := \{show (getStaticIndex loc)}\n\n"
           addCur c loc
           debug $ emit "/* \{c} = \{loc} */"
           pure c
     case loc of
       LocStart _ _ => do
         c <- newCur
-        emit "char* \{c} = newRegion();"
+        emit "cur_t \{c} = alloc_buffer();"
         pure c
       LocAfter _ l => do
         c <- newCur
-        emit "char* \{c} = \{!(getEndWitness l)};"
+        emit "cur_t \{c} = \{!(getEndWitness l)};"
         pure c
       LocAfterTag s fstTy l => do
         let tagSize : Int = case s of
               "Pair"  => 0
-              _       => 1
+              _       => 8
         c <- newCur
-        emit "char* \{c} = \{!(getCursor l)} + \{tagSize};"
+        emit "cur_t \{c} = advance_cursor(\{!(getCursor l)}, \{tagSize});"
         pure c
 
 allocCursorIfNeeded : (loc : Loc r) -> M String
@@ -366,7 +351,7 @@ defineEndWitness loc value msg = unless !(hasEndWitness loc) $ do
     Nothing   => newCursorName
     Just cur  => pure "\{cur}_end"
   modify {local.endwitness $= insert (show loc) ew}
-  emit "char* \{ew} = \{value}; //\{msg}"
+  emit "cur_t \{ew} = \{value}; //\{msg}"
 
 updateEndWitnessTo : {loc2 : _} -> (loc : Loc r) -> Exp _ loc2 _ _ -> M ()
 updateEndWitnessTo {loc2} loc e = do
@@ -388,13 +373,13 @@ inheritEndWitness loc e = case rw of
 addStaticSizeEndWitness : (loc : Loc r) -> String -> M ()
 addStaticSizeEndWitness l msg = do
   let t = getLocTy l
-      Just bytes = getStaticSize t
+      Just bits = getStaticBitSize t
         | Nothing => assert_total $ idris_crash $ "INTERNAL ERROR: \{msg} missing static size for: \{l}"
   unless !(hasEndWitness l) $ do
     cur <- getCursor l
     let ew = "\{cur}_end"
     modify {local.endwitness $= insert (show l) ew}
-    emit "char* \{ew} = \{cur} + \{bytes}; // \{msg}"
+    emit "cur_t \{ew} = advance_cursor(\{cur}, \{bits}); // \{msg}"
     print $ colored BrightCyan " add endwitness to \{ew} for\n \{l}\n\n"
 
 {-
@@ -451,7 +436,7 @@ genEW {ew=NoEW} e with (decEq True $ isStaticSize t)
 genTraversalEW : {r : _} -> {loc : Loc r} -> {t : _} -> {ew : _} -> Exp t loc (R ew) [] -> M String
 genTraversalEW e = do
   let key = show t
-  when (isJust $ getStaticSize t) $ assert_total $ idris_crash $ "traverseLoc for static size: \{t}"
+  when (isStaticSize t) $ assert_total $ idris_crash $ "traverseLoc for static size: \{t}"
   fun_name <- case lookup key !(gets (.traverseFuns)) of
     Nothing => do
       let fun_name = "traverseFun\{!newId}"
@@ -459,8 +444,8 @@ genTraversalEW e = do
       runAfterGenFunction $ genFunction fun_name $ do
         cur <- newCursorName
         markAlreadyWritten loc $ markAlloc loc $ addCur cur loc
-        emitDecl "char* \{fun_name}(char* \{cur}); /* \{key} */"
-        emit "char* \{fun_name}(char* \{cur}) { /* \{key} */"
+        emitDecl "char* \{fun_name}(cur_t \{cur}); /* \{key} */"
+        emit "char* \{fun_name}(cur_t \{cur}) { /* \{key} */"
         indent $ do
           debug $ emit "/* \{cur} = \{loc} */"
           readDyn $ genEW e
@@ -501,7 +486,7 @@ fillDyn (MkI64 i) = do
   putStrLn " ++ MkI64 \{i}"
   cur <- allocCursor loc
   addStaticSizeEndWitness loc "MkI64"
-  markWrite loc $ emit "*(int*) \{cur} = \{i}; // MkI64"
+  markWrite loc $ emit "write_int64(\{cur}, \{i}); // MkI64"
 
 fillDyn (MkPair va vb) = do
   putStrLn " ++ MkPair"
@@ -523,7 +508,7 @@ fillDyn (MkPtr {loc_in} v) = do
   -- HINT: it is required that the target to be written, it will make the dereferenced value valid
   getWrittenCursor loc_in $ \cur_in => do
     putStrLn " ++ MkPtr - 1"
-    markWrite loc $ emit "*(char**) \{cur} = \{cur_in}; // MkPtr"
+    markWrite loc $ emit "write_int64(\{cur}, cursor_to_int64(\{cur_in})); // MkPtr"
 
 fillDyn (MkOffset {loc_in} v) = do
   putStrLn " ++ MkOffset"
@@ -533,7 +518,7 @@ fillDyn (MkOffset {loc_in} v) = do
   -- HINT: it is required that the target to be written, it will make the dereferenced value valid
   getWrittenCursor loc_in $ \cur_in => do
     putStrLn " ++ MkOffset - 1"
-    markWrite loc $ emit "*(int*) \{cur} = \{cur_in} - \{cur}; // MkOffset"
+    markWrite loc $ emit "write_int32(\{cur}, cursor_to_int64(\{cur_in}) - cursor_to_int64(\{cur})); // MkOffset"
 
 {-
   done - add assertions when alloc and actions were not run in the end of codegen
@@ -542,7 +527,7 @@ fillDyn (MkOffset {loc_in} v) = do
 fillDyn (MkLeft arg) = do
   putStrLn " ++ MkLeft"
   cur <- allocCursor loc
-  emit "*(char*) \{cur} = 0; // LEFT_TAG"
+  emit "write_bool(\{cur}, 0); // LEFT_TAG"
   fillDyn arg
   inheritEndWitness loc arg
   getWrittenCursor (getLoc arg) $ \_ => do
@@ -552,7 +537,7 @@ fillDyn (MkLeft arg) = do
 fillDyn (MkRight arg) = do
   putStrLn " ++ MkRight"
   cur <- allocCursor loc
-  emit "*(char*) \{cur} = 1; // RIGHT_TAG"
+  emit "write_bool(\{cur}, 1); // RIGHT_TAG"
   fillDyn arg
   inheritEndWitness loc arg
   getWrittenCursor (getLoc arg) $ \_ => do
@@ -587,7 +572,7 @@ fillDyn (I64Op2 op {loc_in1, loc_in2} arg1 arg2) = do
     putStrLn " ++ I64Op2 - 1"
     getWrittenCursor loc_in2 $ \cur_in2 => do
       putStrLn " ++ I64Op2 - 2"
-      markWrite loc $ emit "*(int*) \{cur} = *(int*) \{cur_in1} \{op} *(int*) \{cur_in2}; // I64Op2"
+      markWrite loc $ emit "write_int64(\{cur}, read_int64(\{cur_in1}) \{op} read_int64(\{cur_in2})); // I64Op2"
 
 fillDyn (I64Cmp op {loc_in1, loc_in2} arg1 arg2) = do
   putStrLn " ++ I64Cmp"
@@ -599,7 +584,7 @@ fillDyn (I64Cmp op {loc_in1, loc_in2} arg1 arg2) = do
     putStrLn " ++ I64Cmp - 1"
     getWrittenCursor loc_in2 $ \cur_in2 => do
       putStrLn " ++ I64Cmp - 2"
-      markWrite loc $ emit "*(char*) \{cur} = (*(int*) \{cur_in1} \{op} *(int*) \{cur_in2}) ? 1 /*RIGHT_TAG*/ : 0 /*LEFT_TAG*/;"
+      markWrite loc $ emit "write_bool(\{cur}, (read_int64(\{cur_in1}) \{op} read_int64(\{cur_in2})) ? 1 /*RIGHT_TAG*/ : 0 /*LEFT_TAG*/);"
 {-
 fillDyn (I64CmpC op argC1 {loc_in2} arg2) = do
   putStrLn " ++ I64CmpC"
@@ -617,8 +602,10 @@ fillDyn (Copy {loc_in} v) = do
   getWrittenCursor loc_in $ \cur_src => do
     putStrLn " ++ Copy - 2"
     cur_src_end <- getEndWitness loc_in
-    defineEndWitness loc "\{cur_dst} + (\{cur_src_end} - \{cur_src})" "Copy"
-    markWrite loc $ emit "memcpy(\{cur_dst}, \{cur_src}, \{cur_src_end} - \{cur_src}); // Copy"
+    let size = "size\{!newId}"
+    emit "int \{size} = cursor_to_int64(\{cur_src_end}) - cursor_to_int64(\{cur_src});"
+    defineEndWitness loc "advance_cursor(\{cur_dst}, \{size})" "Copy"
+    markWrite loc $ emit "copy_bits(\{cur_dst}, \{cur_src}, \{size}); // Copy"
 
 fillDyn (FunApp {fun_ews, loc_res} fun_name args) = do
   putStrLn " ++ FunApp \{fun_name}"
@@ -653,7 +640,7 @@ fillDyn (FunAppDef {res, fun_ews, loc_res} fun_name fun args) = do
 
             putStrLn " ++ FunAppDef \{fun_name} - arg - add end-witness \{loc_param}"
             -- TODO: design proper arg end-witness handling
-            let act2 = when (isJust $ getStaticSize $ getTy e) $ do
+            let act2 = when (isStaticSize $ getTy e) $ do
                         addStaticSizeEndWitness loc_param "FunAppDef - arg"
 
             buildParams (act >> act2) ("char* \{cur_param}" :: params) ("/* \{cur_param} = \{loc_param} */" :: paramDocs) a
@@ -666,8 +653,8 @@ fillDyn (FunAppDef {res, fun_ews, loc_res} fun_name fun args) = do
 
           paramDecls = joinBy ", " $ reverse params
 
-      emitDecl "char* \{fun_name}(\{paramDecls}, char* \{cur_out});"
-      emit "char* \{fun_name}(\{paramDecls}, char* \{cur_out}) {"
+      emitDecl "cur_t \{fun_name}(\{paramDecls}, cur_t \{cur_out});"
+      emit "cur_t \{fun_name}(\{paramDecls}, cur_t \{cur_out}) {"
       indent $ do
         debug $ for_ paramDocs emit
         debug $ emit "/* \{cur_out} = \{loc_res} */"
@@ -718,7 +705,7 @@ evalCont (PrintI64 {loc_in} v cont) mode = do
   readDyn v
   getWrittenCursor loc_in $ \cur_in => do
     putStrLn " ++ PrintI64 (read) - 1"
-    emit "printf(\"%d\\n\", *(int*) \{cur_in});"
+    emit "printf(\"%ld\\n\", read_int64(\{cur_in}));"
     evalCGMode mode $ cont ()
 
 evalCont (PrintValue {loc_in} v cont) mode = do
@@ -728,7 +715,7 @@ evalCont (PrintValue {loc_in} v cont) mode = do
   getWrittenCursor loc_in $ \cur_in => do
     putStrLn " ++ PrintValue (read) - 1"
     cur_end <- getEndWitness loc_in
-    emit "print_hex(\{cur_in}, \{cur_end} - \{cur_in});"
+    emit "print_hex(\{cur_in}, \{cur_end});"
     putStrLn " ++ PrintValue (read) - 0 - 1"
     evalCGMode mode $ cont ()
 
@@ -744,7 +731,7 @@ evalCont (DeRefOffset {x, r_in, loc_in} v cont) mode = do
     debug $ emit "/* \{cur} = \{loc_val} */"
     markAlloc loc_val $ do
       addCur cur loc_val
-      emit "char* \{cur} = \{cur_in} + *(int*)\{cur_in}; // DeRefOffset"
+      emit "cur_t \{cur} = advance_cursor(\{cur_in}, read_int32(\{cur_in})); // DeRefOffset"
     markWrite loc_val $ pure ()
     evalCGMode mode (cont {r_val} Var)
 
@@ -760,7 +747,7 @@ evalCont (DeRefPtr {x, r_in, loc_in} v cont) mode = do
     debug $ emit "/* \{cur} = \{loc_val} */"
     markAlloc loc_val $ do
       addCur cur loc_val
-      emit "char* \{cur} = *(char**)\{cur_in}; // DeRefPtr"
+      emit "cur_t \{cur} = int64_to_cursor(read_int64(\{cur_in})); // DeRefPtr"
     markWrite loc_val $ pure ()
     evalCGMode mode (cont {r_val} Var)
 
@@ -775,14 +762,14 @@ evalCont (CaseEither {a, b, loc_scrut, ew_scrut} scrut cont_left cont_right) mod
     let cur_res_tmp     = "\{!(newCursorName)}_res_tmp"
         cur_end_tmp     = "\{cur_res_tmp}_end_tmp"
         cur_tag_end_tmp = "\{!(newCursorName)}_end_tmp"
-    emit "char* \{cur_res_tmp} = 0; // uninitalized CaseEither result"
-    emit "char* \{cur_end_tmp} = 0; // uninitalized CaseEither result end-witness"
-    emit "char* \{cur_tag_end_tmp} = 0; // uninitalized CaseEither scrutinee end-witness"
+    emit "cur_t \{cur_res_tmp} = null_cur; // uninitalized CaseEither result"
+    emit "cur_t \{cur_end_tmp} = null_cur; // uninitalized CaseEither result end-witness"
+    emit "cur_t \{cur_tag_end_tmp} = null_cur; // uninitalized CaseEither scrutinee end-witness"
 {-
     cur20_res_tmp_end_tmp = cur25_end; // FIX
 -}
     cg <- get
-    emit "if (*(char*) \{cur_tag} == 0) { // LEFT"
+    emit "if (read_bool(\{cur_tag}) == 0) { // LEFT"
     ({-(has_res_cur_left, scrut_ew_left), -}left_cglocal) <- indent $ localScope $ do
       _ <- markAlreadyWritten locL $ allocCursorIfNeeded locL
       let expL = cont_left Var
@@ -971,7 +958,7 @@ readDyn (GenEW a) = do
   putStrLn " ++ GenEW (read)"
   readDyn a
   let t = getLocTy loc
-  case getStaticSize t of
+  case getStaticBitSize t of
     Just _  => addStaticSizeEndWitness loc  "GenEW - StaticEW"
     Nothing => defineEndWitness loc "\{!(genTraversalEW a)}" "GenEW - \{show t}"
   case loc of
@@ -995,7 +982,9 @@ c_header = """
     return malloc(1024);
   }
 
-  void print_hex(const unsigned char *buf, size_t len) {
+  void print_hex(const unsigned char *start, const unsigned char *end) {
+    const unsigned char* buf = start;
+    size_t len = (size_t)end - (size_t)start;
     printf("%ld bytes\\n", len);
     for (size_t i = 0; i < len; i++) {
         // %02x: 0-padded, 2-character minimum, lowercase hex
@@ -1007,6 +996,37 @@ c_header = """
     printf("\\n");
   }
 
+  //#define FTG_IMPLEMENT_BITBUFFER
+  //#include "ftg_bitbuffer.h"
+
+  /*
+    alloc_buffer
+    cur_t
+    null_cur
+    advance_cursor : cur_t -> int64 -> cur_t // bit count
+    cursor_to_int64 : cur_t -> int64
+    int64_to_cursor : int -> cur_t
+    write_bool  : cut_t -> bool -> IO ()
+    write_int32 : cur_t -> i64 -> IO ()
+    write_int64 : cur_t -> i64 -> IO ()
+    read_bool   : cur_t -> bool
+    read_int32  : cur_t -> i64
+    read_int64  : cur_t -> i64
+    copy_bits   : cur_t -> cur_t -> int -> IO ()
+  */
+  #define null_cur                0
+  #define cur_t                   char*
+  #define alloc_buffer            newRegion
+  #define advance_cursor(c, s)    ((c) + ((s)/8))
+  #define cursor_to_int64(c)      ((int64_t)(c)*8)
+  #define int64_to_cursor(c)      ((char*)((c)/8))
+  #define write_bool(c, b)        *(char*)(c) = (b)
+  #define write_int32(c, i)       *(int32_t*)(c) = (i)
+  #define write_int64(c, i)       *(int64_t*)(c) = (i)
+  #define read_bool(c)            (*(char*)(c))
+  #define read_int32(c)           (*(int32_t*)(c))
+  #define read_int64(c)           (*(int64_t*)(c))
+  #define copy_bits(dst, src, s)  memcpy(dst, src, (s)/8)
   """
 
 public export partial

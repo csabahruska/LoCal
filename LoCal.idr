@@ -32,27 +32,27 @@ public export Eq Ty    where a == b = showTy a == showTy b
 public export DecEq Ty where decEq = decEq @{FromEq}
 
 public export
-getStaticSize : Ty -> Maybe Int
-getStaticSize = \case
+getStaticBitSize : Ty -> Maybe Int
+getStaticBitSize = \case
   T0    => Just 0
-  I64   => pure 8
-  Offset _ => pure 8
-  Ptr _ => pure 8
+  I64   => pure 64
+  Offset _ => pure 32
+  Ptr _ => pure 64
   Pair a b => do
-    sa <- getStaticSize a
-    sb <- getStaticSize b
+    sa <- getStaticBitSize a
+    sb <- getStaticBitSize b
     pure (sa + sb)
   Either a b => do
-    sa <- getStaticSize a
-    sb <- getStaticSize b
+    sa <- getStaticBitSize a
+    sb <- getStaticBitSize b
     if sa == sb -- special case, when the left and right size matches and statically known
-      then Just (1 + sa)
+      then Just (8 + sa)
       else Nothing
   Box _ _ => Nothing
 
 public export
 isStaticSize : Ty -> Bool
-isStaticSize t = case getStaticSize t of
+isStaticSize t = case getStaticBitSize t of
   Nothing => False
   Just{}  => True
 
