@@ -138,7 +138,29 @@ test_14_bug_unroll = Main $
   LetRegion $ \r =>
   LetRegionValue r (printList_rev (ArgN {fun="printList_rev"} l4 Arg0)) $ \_ => l4
 
+public export
+test_14_bug : Program -- this actually works
+test_14_bug = Main $
+  LetRegion $ \r =>
+  LetRegionValue r (MkI64 1) $ \i =>
+  LetRegion $ \r =>
+  --LetRegionValue r (MkRight MkT0) $ \l3 =>
+  LetRegionValue r (FunAppDef "genList_rev" genList_rev (ArgN i Arg0)) $ \l1 =>
+  LetRegion $ \r =>
+  LetRegionValue r (FunAppDef "mapSuccList_rev" mapSuccList_rev (ArgN l1 Arg0)) $ \l2 =>
+  LetRegion $ \r =>
+  LetRegionValue r (FunAppDef "filterLt5List_rev" filterLt5List_rev (ArgN l2 Arg0)) $ \l3 =>
+  -- Q: what is the problem? is it that l3 is used twice in the arg list and the meta level does not guarantee arg distinction?
+  -- A: no
+  let l4 = FunAppDef "appendList_rev" appendList_rev (ArgN l3 $ ArgN l3 Arg0) in
+  PrintValue l1 $ \_ =>
+  LetRegionValue MainRegion l4 $ \l4 =>
+  PrintValue l4 $ \_ =>
+  LetRegion $ \r =>
+  LetRegionValue r (FunAppDef "printList_rev" printList_rev (ArgN l4 Arg0)) $ \_ => l4
+
 partial main : IO ()
 main = do
+  _ <- compileProgram "test_14_bug" test_14_bug -- fixed
   _ <- compileProgram "test_14_bug_unroll" test_14_bug_unroll -- fixed
   pure ()

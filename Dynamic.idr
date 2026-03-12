@@ -108,8 +108,8 @@ emptyCG = MkCG
   }
 
 debug : M () -> M ()
-debug a = a
---debug _ = pure ()
+--debug a = a
+debug _ = pure ()
 
 printSrc : M ()
 printSrc = do
