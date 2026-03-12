@@ -703,7 +703,9 @@ fillDyn (RightEW{}) = assert_total $ idris_crash $ "fillDyn - RightEW"
 -----------------
 evalCont (LetRegionValue r v cont) mode = do
   putStrLn " ++ LetRegionValue \{show r}"
+  debug $ emit "// start region: \{r}"
   fillDyn v
+  debug $ emit "// finalize region: \{r} \{!(getCursor $ getLoc v)}"
   evalCGMode mode (cont Var)
 
 evalCont (LetRegion cont) mode = do
