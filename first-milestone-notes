@@ -1,7 +1,7 @@
 date: 2026-01-21
 
 PROBLEM: end witness availability is not tracked by the type system, neither the end-witness requirement property
-TODO/FUTURE WORK: extend the type system to track these too
+DONE: extend the type system to track these too
 
 TODO:
   frontend:
@@ -9,7 +9,7 @@ TODO:
     - think through hole fixing machinery ; and hole introduction and region refreshing during hole filling
   backend:
     - handle fun arg end witness passing
-    - design where to handle GenEW a) backend b) hical to local conversion
+    - design where to handle GenEW a) backend b) hical to local conversion ; DONE a)
 
   - try out bitpacking??
     PROBLEMS:
@@ -46,9 +46,9 @@ what works:
   - recursive data types
 
 limitations:
-  - functions have single arguments
   - byte sized tags ; either should have one bit sized tag
   - only I64 primitive type
+  - hical to local conversion is very basic and generates traversals and non optimal region allocation
 
 FUTURE WORK:
   - SKIP: refactor to CPS style EDSL to prevent codegen duplications
@@ -57,6 +57,8 @@ FUTURE WORK:
   done - multi parameter functions
   - index Loc with Ty for more safety
 
-  - sub byte addressing
+  - sub byte addressing ; this is equal to bit packed data
   - pack multiple tags into a byte or machine word
   - more primitive types and primops, e.g. arbitrary sized words, byte-buffer
+  - add write-barrier primitive that could give access to already written data for reading
+    like a written sub-region in a parent region which is partially complete
