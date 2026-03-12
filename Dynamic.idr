@@ -308,6 +308,7 @@ getWrittenCursor loc action = do
   if contains (show loc) !(gets (.local.write))
     then act
     else do
+      -- HINT: needed for offset
       putStrLn "SUSPEND \{loc}"
       addWriteAction loc act
 
