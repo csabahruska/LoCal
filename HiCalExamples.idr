@@ -187,6 +187,19 @@ bug01 =
   let l4 = copyList (ArgN l3 Arg0) in
   PrintValue l4 $ \_ => MkT0
 
+public export
+test_let01 : Program -- this actually works
+test_let01 = Main $
+  Let (MkI64 1) $ \i =>
+  Let (FunAppDef "genList" genList (ArgN i Arg0)) $ \l1 =>
+  PrintValue l1 $ \_ => l1
+
+public export
+test_let02 : Program -- this actually works
+test_let02 = Main $
+  Let (MkI64 1) $ \i =>
+  let l1 = FunAppDef "genList" genList (ArgN i Arg0) in
+  PrintValue l1 $ \_ => l1
 
 public export
 test_14_bug_full_unroll : Program -- this actually works

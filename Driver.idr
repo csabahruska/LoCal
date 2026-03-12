@@ -24,6 +24,8 @@ test14_bug_full = Hi.compileProgram test_14_bug_full
 test14_bug_full_unroll = Hi.compileProgram test_14_bug_full_unroll
 test_bug3_lo = Hi.compileProgram test_bug3
 bug01_lo = Hi.compileProgram bug01
+test_let01_lo = Hi.compileProgram test_let01
+test_let02_lo = Hi.compileProgram test_let02
 
 {-
   Main {res = Pair I64 I64}
@@ -45,6 +47,9 @@ main = do
 
   _ <- Lo.compileProgram "hi_test_bug3" test_bug3_lo
   _ <- Lo.compileProgram "hi_test14_bug_full" test14_bug_full -- fixed
+
+  _ <- Lo.compileProgram "hi_test_let01" test_let01_lo
+  _ <- Lo.compileProgram "hi_test_let02" test_let02_lo
 
   _ <- Lo.compileProgram "hi_test01" test1
   _ <- Lo.compileProgram "hi_test03" test3
