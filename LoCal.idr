@@ -300,7 +300,8 @@ data Exp where
   PrintValue : {t_in : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp t_in loc_in REW [] -> (() -> Exp t loc rw ews) -> Exp t loc rw ews
 
   -- internal
-  Var : Exp t loc rw sew
+  Var : Exp t loc (R ew) sew
+  Tick : Int -> Exp t loc rw sew
 
   -- end-witnesses
   StaticEW : {ew_in : _} -> {auto prf : True = isStaticSize t} -> Exp t loc (R ew_in) [] -> Exp t loc REW []
@@ -356,4 +357,5 @@ showLoExpTag = \case
   Var{}       => "Var"
   StaticEW{}  => "StaticEW"
   GenEW{}     => "GenEW"
+  Tick{}      => "Tick"
   _ => assert_total $ idris_crash "showLoExpTag - TODO"
