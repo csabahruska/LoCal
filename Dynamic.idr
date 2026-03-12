@@ -444,8 +444,8 @@ genTraversalEW e = do
       runAfterGenFunction $ genFunction fun_name $ do
         cur <- newCursorName
         markAlreadyWritten loc $ markAlloc loc $ addCur cur loc
-        emitDecl "char* \{fun_name}(cur_t \{cur}); /* \{key} */"
-        emit "char* \{fun_name}(cur_t \{cur}) { /* \{key} */"
+        emitDecl "cur_t \{fun_name}(cur_t \{cur}); /* \{key} */"
+        emit "cur_t \{fun_name}(cur_t \{cur}) { /* \{key} */"
         indent $ do
           debug $ emit "/* \{cur} = \{loc} */"
           readDyn $ genEW e
@@ -643,7 +643,7 @@ fillDyn (FunAppDef {res, fun_ews, loc_res} fun_name fun args) = do
             let act2 = when (isStaticSize $ getTy e) $ do
                         addStaticSizeEndWitness loc_param "FunAppDef - arg"
 
-            buildParams (act >> act2) ("char* \{cur_param}" :: params) ("/* \{cur_param} = \{loc_param} */" :: paramDocs) a
+            buildParams (act >> act2) ("cur_t \{cur_param}" :: params) ("/* \{cur_param} = \{loc_param} */" :: paramDocs) a
 
       (act, params, paramDocs) <- buildParams (pure ()) [] [] args
 
