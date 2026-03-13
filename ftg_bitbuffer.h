@@ -357,7 +357,7 @@ my__read_bits(my_cursor_t read, int num_bits)
 
 static BITBUF_INLINE
 my_cursor_t my_alloc_buffer() {
-  my_cursor_t c = {.seg = malloc(1024), .bits_into_seg = 0};
+  my_cursor_t c = {.seg = malloc(16*1024), .bits_into_seg = 0};
   return c;
 }
 

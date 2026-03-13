@@ -25,7 +25,7 @@ mapSuccList (ArgN a Arg0) =
 
 genList : Arg [Exp I64] -> Exp Rev_my_ty
 genList (ArgN i Arg0) =
-  CaseEither (EqI64C 10 i)
+  CaseEither (EqI64C 32 i)
     (\f => MkLeft $ MkPair (MkBox $ FunAppDef "genList" genList (ArgN (AddI64C 1 i) Arg0)) i)
     --(\f => MkLeft $ MkPair (MkBox $ MkRight MkT0) (AddI64C 1 i))
     (\t => MkRight MkT0)
@@ -45,7 +45,7 @@ filterLt5List : Arg [Exp Rev_my_ty] -> Exp Rev_my_ty
 filterLt5List (ArgN a Arg0) =
   CaseEither a
     (\l => CasePair l $ \lst, i =>
-        CaseEither (LtI64C 5 i)
+        CaseEither (LtI64C 16 i)
           (\f => FunAppDef "filterLt5List" filterLt5List (ArgN (UnBox lst) Arg0))
           (\t => MkLeft $ MkPair (MkBox $ FunAppDef "filterLt5List" filterLt5List (ArgN (UnBox lst) Arg0)) i)
     )

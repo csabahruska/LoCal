@@ -40,7 +40,7 @@ mapSuccList_rev (ArgN a Arg0) =
 genList_rev : {r_out : _} -> {loc_out : Loc r_out} -> Arg [Exp I64 loc_in REW []] -> Exp Rev_my_ty loc_out W []
 genList_rev (ArgN i Arg0) =
   LetRegion $ \r =>
-  LetRegionValue r (EqI64C 10 i) $ \b =>
+  LetRegionValue r (EqI64C 160 i) $ \b =>
   CaseEither b
     (\f =>
         LetRegion $ \r =>
@@ -73,7 +73,7 @@ filterLt5List_rev (ArgN a Arg0) =
         let lst = GetFst $ GetSnd l $ StaticEW ofs in
         DeRefOffset ofs $ \i =>
         LetRegion $ \r =>
-        LetRegionValue r (LtI64C 5 i) $ \b =>
+        LetRegionValue r (LtI64C 80 i) $ \b =>
         CaseEither b
           (\f => FunAppDef "filterLt5List_rev" filterLt5List_rev (ArgN (UnBox lst) Arg0))
           (\t => let res = FunAppDef "filterLt5List_rev" filterLt5List_rev (ArgN (UnBox lst) Arg0) in
