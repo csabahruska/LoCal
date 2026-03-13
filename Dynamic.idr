@@ -326,7 +326,7 @@ allocCursor loc = markAlloc loc $ case lookup (show loc) !(gets (.local.prealloc
       LocAfterTag s fstTy l => do
         let tagSize : Int = case s of
               "Pair"  => 0
-              _       => 8
+              _       => 1
         c <- newCur
         emit "cur_t \{c} = advance_cursor(\{!(getCursor l)}, \{tagSize});"
         pure c
@@ -466,12 +466,10 @@ readArgs (ArgN {t, fun, n} e a) = do
   readArgs a
 
 -- buffer codegen
--- ?? read or write
 fillDyn (MkBox v) = do
   putStrLn " ++ MkBox"
   fillDyn v
 
--- ?? read or write
 fillDyn (UnBox v) = do
   putStrLn " ++ UnBox"
   fillDyn v
@@ -982,7 +980,7 @@ c_header = """
     return malloc(1024);
   }
 
-  void print_hex(const unsigned char *start, const unsigned char *end) {
+  void print_hex_raw(const unsigned char *start, const unsigned char *end) {
     const unsigned char* buf = start;
     size_t len = (size_t)end - (size_t)start;
     printf("%ld bytes\\n", len);
@@ -996,10 +994,16 @@ c_header = """
     printf("\\n");
   }
 
-  //#define FTG_IMPLEMENT_BITBUFFER
-  //#include "ftg_bitbuffer.h"
+  #define FTG_IMPLEMENT_BITBUFFER
+  #include "ftg_bitbuffer.h"
+
+  char* cur_to_char_ptr(my_cursor_t c) {
+    return (char*)c.seg + (c.bits_into_seg / 8) + (((c.bits_into_seg % 8) == 0) ? 0 : 1);
+  }
+
 
   /*
+    print_hex
     alloc_buffer
     cur_t
     null_cur
@@ -1014,8 +1018,11 @@ c_header = """
     read_int64  : cur_t -> i64
     copy_bits   : cur_t -> cur_t -> int -> IO ()
   */
+  /*
+  // char* based buffer
   #define null_cur                0
   #define cur_t                   char*
+  #define print_hex(s, e)         print_hex_raw(s, e)
   #define alloc_buffer            newRegion
   #define advance_cursor(c, s)    ((c) + ((s)/8))
   #define cursor_to_int64(c)      ((int64_t)(c)*8)
@@ -1027,6 +1034,22 @@ c_header = """
   #define read_int32(c)           (*(int32_t*)(c))
   #define read_int64(c)           (*(int64_t*)(c))
   #define copy_bits(dst, src, s)  memcpy(dst, src, (s)/8)
+  */
+  // bit packed buffer
+  #define null_cur                {.seg = 0, .bits_into_seg = 0}
+  #define cur_t                   my_cursor_t
+  #define print_hex(s, e)         print_hex_raw(cur_to_char_ptr(s), cur_to_char_ptr(e))
+  #define alloc_buffer            my_alloc_buffer
+  #define advance_cursor(c, s)    my__advance_cursor(c, s)
+  #define cursor_to_int64(c)      cursor_to_int64(c)
+  #define int64_to_cursor(i)      int64_to_cursor(i)
+  #define write_bool(c, b)        my_write_bool(c, b)
+  #define write_int32(c, i)       my_write_int32(c, i)
+  #define write_int64(c, i)       my_write_int64(c, i)
+  #define read_bool(c)            my_read_bool(c)
+  #define read_int32(c)           my_read_int32(c)
+  #define read_int64(c)           my_read_int64(c)
+  #define copy_bits(dst, src, s)  my_copy_bits(dst, src, s)
   """
 
 public export partial
@@ -1052,7 +1075,7 @@ compileProgram name (Main e) = do
   src <- toBufferDyn e
   Right _ <- writeFile fname src
     | Left err => idris_crash (show err)
-  (c_msg, 0) <- run "gcc -O3 \{fname} -o test/\{name}"
+  (c_msg, 0) <- run "gcc -O3 \{fname} -o test/\{name} -I."
     | err => idris_crash (show err)
   putStrLn c_msg
   pure src

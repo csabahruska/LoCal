@@ -46,7 +46,7 @@ getStaticBitSize = \case
     sa <- getStaticBitSize a
     sb <- getStaticBitSize b
     if sa == sb -- special case, when the left and right size matches and statically known
-      then Just (8 + sa)
+      then Just (1 + sa)
       else Nothing
   Box _ _ => Nothing
 
