@@ -1019,7 +1019,8 @@ c_header = """
     copy_bits   : cur_t -> cur_t -> int -> IO ()
   */
 
-  #if 0
+  #ifdef BYTEPACKED
+  #warning "char* based buffer"
   // char* based buffer
   #define BYTES(bits)             ((bits)/8 + ((((bits)%8) == 0)? 0 : 1))
   #define null_cur                0
@@ -1038,6 +1039,7 @@ c_header = """
   #define copy_bits(dst, src, s)  memcpy(dst, src, BYTES(s))
   #else
   // bit packed buffer
+  #warning "bit packed buffer"
   #define null_cur                {.seg = 0, .bits_into_seg = 0}
   #define cur_t                   my_cursor_t
   #define print_hex(s, e)         print_hex_raw(cur_to_char_ptr(s), cur_to_char_ptr(e))
