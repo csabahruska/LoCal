@@ -1,0 +1,5 @@
+set -x -e
+for i in $@; do
+gcc -O3 $i -o$i.bit
+gcc -O3 -DBYTEPACKED $i -o$i.byte
+done
