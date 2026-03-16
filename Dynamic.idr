@@ -977,7 +977,7 @@ c_header = """
   #include <string.h>
 
   char* newRegion() {
-    return malloc(1024);
+    return malloc(16*1024);
   }
 
   void print_hex_raw(const unsigned char *start, const unsigned char *end) {
@@ -1018,13 +1018,15 @@ c_header = """
     read_int64  : cur_t -> i64
     copy_bits   : cur_t -> cur_t -> int -> IO ()
   */
-  /*
+
+  #if 0
   // char* based buffer
+  #define BYTES(bits)             ((bits)/8 + ((((bits)%8) == 0)? 0 : 1))
   #define null_cur                0
   #define cur_t                   char*
   #define print_hex(s, e)         print_hex_raw(s, e)
   #define alloc_buffer            newRegion
-  #define advance_cursor(c, s)    ((c) + ((s)/8))
+  #define advance_cursor(c, s)    ((c) + BYTES(s))
   #define cursor_to_int64(c)      ((int64_t)(c)*8)
   #define int64_to_cursor(c)      ((char*)((c)/8))
   #define write_bool(c, b)        *(char*)(c) = (b)
@@ -1033,8 +1035,8 @@ c_header = """
   #define read_bool(c)            (*(char*)(c))
   #define read_int32(c)           (*(int32_t*)(c))
   #define read_int64(c)           (*(int64_t*)(c))
-  #define copy_bits(dst, src, s)  memcpy(dst, src, (s)/8)
-  */
+  #define copy_bits(dst, src, s)  memcpy(dst, src, BYTES(s))
+  #else
   // bit packed buffer
   #define null_cur                {.seg = 0, .bits_into_seg = 0}
   #define cur_t                   my_cursor_t
@@ -1050,6 +1052,7 @@ c_header = """
   #define read_int32(c)           my_read_int32(c)
   #define read_int64(c)           my_read_int64(c)
   #define copy_bits(dst, src, s)  my_copy_bits(dst, src, s)
+  #endif
   """
 
 public export partial
