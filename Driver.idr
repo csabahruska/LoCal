@@ -26,6 +26,7 @@ test_bug3_lo = Hi.compileProgram test_bug3
 bug01_lo = Hi.compileProgram bug01
 test_let01_lo = Hi.compileProgram test_let01
 test_let02_lo = Hi.compileProgram test_let02
+test_bit_list_01_lo = Hi.compileProgram test_bit_list_01
 
 {-
   Main {res = Pair I64 I64}
@@ -65,5 +66,7 @@ main = do
   _ <- Lo.compileProgram "hi_test13_unroll_bug" test13_unroll -- fixed
   _ <- Lo.compileProgram "hi_test14_bug" test14_bug -- fixed
   _ <- Lo.compileProgram "hi_test14_bug2" test14_bug2 -- fixed
+
+  _ <- Lo.compileProgram "hi_test_bit_list_01" test_bit_list_01_lo
 
   pure ()

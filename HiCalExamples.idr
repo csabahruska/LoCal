@@ -409,6 +409,22 @@ test_bug3 = Main $ PrintValue
   (CaseEither {a=T0} (MkRight MkT0) (\_ => MkT0) (\_ => MkT0)) $ \_ =>
   MkT0
 
+public export
+Rev_my_ty2 : Ty
+Rev_my_ty2 = Either (Pair (Box "Rev_my_ty2" Rev_my_ty2) T0) T0
+
+genList2 : Arg [Exp I64] -> Exp Rev_my_ty2
+genList2 (ArgN i Arg0) =
+  CaseEither (EqI64C 32 i)
+    (\f => MkLeft $ MkPair (MkBox $ FunAppDef "genList2" genList2 (ArgN (AddI64C 1 i) Arg0)) MkT0)
+    (\t => MkRight MkT0)
+
+public export
+test_bit_list_01 : Program -- this actually works
+test_bit_list_01 = Main $
+  let l1 = FunAppDef "genList2" genList2 (ArgN (MkI64 1) Arg0) in
+  PrintValue l1 $ \_ => l1
+
 {-
 Main (LetRegionValue (MkRegion 2)
   (CaseEither (LetRegionValue (MkRegion 5) (I64Cmp EQ Var (LetRegionValue (MkRegion 7) (MkI64 10) (\_ => Var))) (\_ => Var))
