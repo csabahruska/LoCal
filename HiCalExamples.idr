@@ -415,7 +415,7 @@ Rev_my_ty2 = Either (Pair (Box "Rev_my_ty2" Rev_my_ty2) T0) T0
 
 genList2 : Arg [Exp I64] -> Exp Rev_my_ty2
 genList2 (ArgN i Arg0) =
-  CaseEither (EqI64C 32 i)
+  CaseEither (EqI64C 7 i)
     (\f => MkLeft $ MkPair (MkBox $ FunAppDef "genList2" genList2 (ArgN (AddI64C 1 i) Arg0)) MkT0)
     (\t => MkRight MkT0)
 
