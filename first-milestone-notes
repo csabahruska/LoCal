@@ -7,6 +7,8 @@ TODO:
   frontend:
     - linear region inference for lets
     - think through hole fixing machinery ; and hole introduction and region refreshing during hole filling
+    - switch to EitherT instead of manual backtracking by using get/put
+      + remove fixHolesXXX functions
   backend:
     - handle fun arg end witness passing
     - design where to handle GenEW a) backend b) hical to local conversion ; DONE a)
@@ -46,7 +48,6 @@ what works:
   - recursive data types
 
 limitations:
-  - byte sized tags ; either should have one bit sized tag
   - only I64 primitive type
   - hical to local conversion is very basic and generates traversals and non optimal region allocation
 
@@ -57,8 +58,9 @@ FUTURE WORK:
   done - multi parameter functions
   - index Loc with Ty for more safety
 
-  - sub byte addressing ; this is equal to bit packed data
-  - pack multiple tags into a byte or machine word
+  done - sub byte addressing ; this is equal to bit packed data
+  done - pack multiple tags into a byte or machine word
+  - add alignment control to the model
   - more primitive types and primops, e.g. arbitrary sized words, byte-buffer
   - add write-barrier primitive that could give access to already written data for reading
     like a written sub-region in a parent region which is partially complete
