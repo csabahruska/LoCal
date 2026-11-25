@@ -1,4 +1,4 @@
-short intro for the serialized representation and reference for the papers and the gibbom copmpiler
+short intro for the serialized representation and reference for the papers and the gibbon compiler
 
 for the details read the location calculus paper
 
@@ -7,3 +7,54 @@ also, future plans to use the edsl local as a compiler IR and also use staging w
 also plans for low level codegen, with memory layout control. memory layout control is needed for many things, i.e. SIMD vectorisation
 
 benefits of the edsl approach with dependent types: everything is simpler, faster iterations of experiments, cleaner code focused on the domain only
+
+blog post:
+  + location calculus
+  + planned compiler design: staged interpreter
+  + 2ltt staging, mikrocsip, idris2 staging
+  + port estgi to idris2 and make it fast with staging
+
+but the focus is on LoCal and Idris2 programming.
+what do I want to tell: my vision, the steps and tech components, the step by step plan
+
+what do i expect from showing my results and plans?
+  support, good words, maybe opportunities
+
+what happened since september?
+  i started to use idris2
+  first experience with dependent types for domain modelling
+  learned gibbon's design and reasearch material
+
+random thoughts:
+  write new rts for haskell in staged dep-typed language to enforce rts invarians and without runtime overhead and for maximum performance and code simplicity.
+  dep types are simpler than haskell
+
+idea: do not go too deep with the vision, instead stick to the LoCal topic and EDSL desing and the benefits if it.
+
+message layers:
+  - vision:       dep types, staging, simlicity with performance
+  - tech details: LoCal model and purpose, what it generates, how it works
+
+LoCal tech topics:
+  - type system implementation: elaborator or EDSL in dep-type system
+  - types tracks properties, properties of the serialized format (after location, end-witness)
+  - building and reading values
+  - regions, recursive types
+  - explicit and controlled indirections
+  - regions and allocations, and regions in the classic representation (everything is indirection)
+  - hical and local, modeling ADTs with sum of products
+  - more possibilities: bitpacking, and bit level layout control, i.e. this provides high level model for pointer tagging
+  - future ideas: alignent control + bit packing, vectorisation
+
+----- blog post
+where am i? what i've done. what is the current plan.
+
+Hello, It's been a while since I posted my last writing. I've learned lot of things in the past years.
+My goal is still unchanged, it is to create a new and faster and simpler compiler backend for haskell and possible for other functional languages.
+But there is a change in the design and implementation, I switched to Idris2.
+This means that the first part of my haskell compiler pipeline will use GHC for haskell frontend, but the second part will be written in idris2.
+The first part of the pipeline (GHC) will parse, typecheck and optimize core and save the result to external stg files.
+Then the estg ir will be read by the backend that will be written in idris2, more specifically staged idris2. Let me elaborate this design.
+; changed work environment and team and experteese, close lollab with peter and andras, lesson from estgi debugger, feature complete estgi, test system, cmm knowledge
+this is why i changed the design to more ambitious
+
