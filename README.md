@@ -1,1 +1,95 @@
 # LoCal
+
+An improved version of Gibbon compiler's Location Calculus as Idris2 EDSL.
+
+TODO:
+  + crude explanation
+  + few examples
+
+bevezeto:
+
+a LoCal idris EDSL az adatreprezentaciok leirasara keszult, az alabbi cikk alapjan: https://gibbon-compiler.github.io/public/pldi19ext.pdf
+Segitsegevel leirhato tetszoleges adatszerkezet, szamok, rekordok, algebrai adattipusok, rekurziv adatszerkezetek es indirekciok.
+Tovabba leirhatok azok a fuggvenyek is amik ezeken az adatokon dolgoznak, ugy hogy a reprezentaciot garantaltan helyesen kezelik.
+
+A LoCal nyelv tulajdonsagai tipusokkal vannak garantaltan betartatva. Minden aspektus az Exp adattipus egy egy indexekent van modellezve,
+ a reprezentalt adat tipusa, a memoria layoutja (location), hogy mar irtuk vagy olvastuk e (eljutottunk e az adat vegere)
+
+1. a reprezentalt adat tipusa
+a reprezentalt adat e kovetkezo elemekbol epulhet fel.
+Az osszetett adatok primitivekbol epulnek fel, pl a Bool az Either T0, igy pont egy bitnyi informaciot tartalmaz.
+A rekordok parokbol az algebrai adattipusok egymasba agyazott either es par elemekbol epulnek fel.
+A rekurziv adattipusokat a Box primitivvel lehet kifejezni, az indirekciokat pedig Offset vagy Ptr tipussal.
+
+data Ty : Type where
+  T0      : Ty
+  Pair    : Ty -> Ty -> Ty   -- serial access only, fst then snd
+  Either  : Ty -> Ty -> Ty
+  I64     : Ty
+  -- IDEA: Offset - region local ; Ptr - cross region
+  Offset  : Ty -> Ty -- signed pointer offset value
+  Ptr     : Ty -> Ty -- raw pointer ; no tag ; just the location data
+  -- recursive type support
+  Box     : String -> Lazy Ty -> Ty
+
+2. memory layout
+az adat elhelyezkedeset a region es location hatarozza meg.
+a region egy buffer amiben osszefuggo adat van, a location az adat elemeinek elhelyezkedeset mondja meg egymashoz viszonyitva
+
+data Region : Type where
+  MkRegion    : Int -> Region
+  MkArgRegion : String -> Nat -> Region
+
+data Loc : (r : Region) -> Type where
+  LocStart    : (t : Ty) -> (r : Region) -> Loc r
+  LocAfter    : (t : Ty) -> Loc r -> Loc r
+  LocAfterTag : String -> (t : Ty) -> Loc r -> Loc r -- statically known ; used for jump over the tag
+
+3. adat eleres, iras olvasas, adat eleje es vege
+a nyelv immutable adatokat modellez, igy kulon van valasztva az iras es olvasas, azaz amikor erteket rakunk ossze es amikor erteket szedunk szet.
+ez lenyegeben azt jeleti hogy egy erteket addig nem olvashatunk amig nem raktuk ossze amig nem irtuk ki az utolso elemet is.
+Ezt modellezi az RWMode.
+
+a masik fontos koncepcio az EndWitness. az adatok a bufferben szigoruan egymas mellett (szomszedosan) helyezkednek el, es ha hozzaferest szeretnenk kapni egy elemre akkor
+ahhoz kotelezoen fel kell valahogy dolgozni az elotte levo elemet. A feldolgozas itt az adat reprezentacioja azon belul is a meret aspektust jelenti.
+Az end witness azt jelenti hogy tudjuk az adott location levo adat meretet ezert mar van hozzaferesunk a rakovetkezo adatelemhez is.
+Az iras/olvasas es end-witness tulajdonsag kozott van osszefugges, ez ezek szerint modelleztem ezeket az EDSL-ben.
+Minden irott adat eseteben automatikusan eloall az end-witness ahogy beleirjuk az adatot a bufferbe es ezzel noveljuk a buffer pointert.
+Mig az olvasas modban csak akkor kapjuk meg az end-witness-t az adatot mar feldolgoztuk.
+
+data EndWitness = NoEW | EW -- TODO: index it with Loc
+data RWMode = R EndWitness | W -- W always has end-witness
+
+4. LoCal kifejezesek, a lenyeg
+az expression tipus az edsl lenyege. a tipus indexek kenyszeritik ki domain invariansait
+az utolso index a saved_ews meg nincs teljesen befejezve, ez jelenleg nincs hasznaatban csak proog of concept szerepet szolgalt egy kiserletben.
+
+data Exp : (t : Ty) -> (loc : Loc r) -> (rw : RWMode) -> (saved_ews : List Type) -> Type
+
+az exp osszetevoi:
+  + primitiv muveletek a primitiv tipusokhoz mint az I64
+  + adat konstrukcio: I64, parok, either
+  + adatok szetszedese: parok, either
+  + indirekcio keszitese, olvasasa
+  + rekurziv tipusok ki es becsomagolasa
+  + explicit sharing (copy)
+  + regio (buffer) keszitese
+  + fuggveny definicio es fuggvenyhivas
+  + end-witness eloallitasa
+
+5. nehany egyszeru pelda
+
+```idris
+i64 : {loc : _} -> Exp I64 loc W []
+i64 = MkI64 1
+
+sample_tup2_01 : {r : _} -> {loc : Loc r} -> Exp (Pair I64 I64) loc W []
+sample_tup2_01 =
+  -- create i64 values
+  let i1 = MkI64 101 in
+  let i2 = MkI64 201 in
+  MkPair i1 i2
+
+sample_left_01 : {r : _} -> {loc : Loc r} -> Exp (Either (Pair I64 I64) I64) loc W []
+sample_left_01 = MkLeft sample_tup2_01
+```
