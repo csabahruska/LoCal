@@ -16,7 +16,6 @@ a reprezentalt adat e kovetkezo elemekbol epulhet fel.
 Az osszetett adatok primitivekbol epulnek fel, pl a Bool az Either T0, igy pont egy bitnyi informaciot tartalmaz.
 A rekordok parokbol az algebrai adattipusok egymasba agyazott either es par elemekbol epulnek fel.
 A rekurziv adattipusokat a Box primitivvel lehet kifejezni, az indirekciokat pedig Offset vagy Ptr tipussal.
-
 ```idris
 data Ty : Type where
   T0      : Ty
@@ -33,7 +32,6 @@ data Ty : Type where
 2. memory layout
 az adat elhelyezkedeset a region es location hatarozza meg.
 a region egy buffer amiben osszefuggo adat van, a location az adat elemeinek elhelyezkedeset mondja meg egymashoz viszonyitva
-
 ```idris
 data Region : Type where
   MkRegion    : Int -> Region
@@ -49,14 +47,12 @@ data Loc : (r : Region) -> Type where
 a nyelv immutable adatokat modellez, igy kulon van valasztva az iras es olvasas, azaz amikor erteket rakunk ossze es amikor erteket szedunk szet.
 ez lenyegeben azt jeleti hogy egy erteket addig nem olvashatunk amig nem raktuk ossze amig nem irtuk ki az utolso elemet is.
 Ezt modellezi az RWMode.
-
 a masik fontos koncepcio az EndWitness. az adatok a bufferben szigoruan egymas mellett (szomszedosan) helyezkednek el, es ha hozzaferest szeretnenk kapni egy elemre akkor
 ahhoz kotelezoen fel kell valahogy dolgozni az elotte levo elemet. A feldolgozas itt az adat reprezentacioja azon belul is a meret aspektust jelenti.
 Az end witness azt jelenti hogy tudjuk az adott location levo adat meretet ezert mar van hozzaferesunk a rakovetkezo adatelemhez is.
 Az iras/olvasas es end-witness tulajdonsag kozott van osszefugges, ez ezek szerint modelleztem ezeket az EDSL-ben.
 Minden irott adat eseteben automatikusan eloall az end-witness ahogy beleirjuk az adatot a bufferbe es ezzel noveljuk a buffer pointert.
 Mig az olvasas modban csak akkor kapjuk meg az end-witness-t az adatot mar feldolgoztuk.
-
 ```idris
 data EndWitness = NoEW | EW -- TODO: index it with Loc
 data RWMode = R EndWitness | W -- W always has end-witness
