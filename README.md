@@ -62,6 +62,10 @@ data RWMode = R EndWitness | W -- W always has end-witness
 
 `Exp` is the core of the EDSL, using type indices to enforce domain invariants. The final `saved_ews` index is incomplete and currently unused, remaining only as a proof of concept from an earlier experiment.
 
+```idris
+data Exp : (t : Ty) -> (loc : Loc r) -> (rw : RWMode) -> (saved_ews : List Type) -> Type
+```
+
 `Exp` supports:
 * Primitive operations on primitive types (such as `I64`)
 * Constructing data (`I64`, pairs, `Either`)
@@ -74,8 +78,7 @@ data RWMode = R EndWitness | W -- W always has end-witness
 * Producing end witnesses
 
 ```idris
-data Exp : (t : Ty) -> (loc : Loc r) -> (rw : RWMode) -> (saved_ews : List Type) -> Type where
-
+data Exp where
   -- Q: when to introduce new regions? A: for intermediate values
   LetRegion : (Region -> Exp t loc rw ews) -> Exp t loc rw ews -- TODO: remove this op, or add an iterpretation layer that evaluates it
   LetRegionValue : {t_val : _} -> (r_val : Region) -> Exp t_val (LocStart t_val r_val) W [] ->
