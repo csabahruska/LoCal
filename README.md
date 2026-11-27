@@ -2,10 +2,6 @@
 
 An improved version of Gibbon compiler's Location Calculus as Idris2 EDSL.
 
-TODO:
-  + crude explanation
-  + few examples
-
 bevezeto:
 
 a LoCal idris EDSL az adatreprezentaciok leirasara keszult, az alabbi cikk alapjan: https://gibbon-compiler.github.io/public/pldi19ext.pdf
@@ -60,7 +56,7 @@ Mig az olvasas modban csak akkor kapjuk meg az end-witness-t az adatot mar feldo
 data EndWitness = NoEW | EW -- TODO: index it with Loc
 data RWMode = R EndWitness | W -- W always has end-witness
 
-4. LoCal kifejezesek, a lenyeg
+### LoCal kifejezesek, a lenyeg
 az expression tipus az edsl lenyege. a tipus indexek kenyszeritik ki domain invariansait
 az utolso index a saved_ews meg nincs teljesen befejezve, ez jelenleg nincs hasznaatban csak proog of concept szerepet szolgalt egy kiserletben.
 
@@ -77,7 +73,7 @@ az exp osszetevoi:
   + fuggveny definicio es fuggvenyhivas
   + end-witness eloallitasa
 
-5. nehany egyszeru pelda
+### nehany egyszeru pelda
 
 ```idris
 i64 : {loc : _} -> Exp I64 loc W []
@@ -92,4 +88,26 @@ sample_tup2_01 =
 
 sample_left_01 : {r : _} -> {loc : Loc r} -> Exp (Either (Pair I64 I64) I64) loc W []
 sample_left_01 = MkLeft sample_tup2_01
+
+test3 : Program
+test3 = Main $ LetRegionValue MainRegion (MkI64 1) $ \i => PrintI64 i $ \() => i
+
+test4 : Program
+test4 = Main $
+  LetRegion $ \r => LetRegionValue r (MkI64 1) $ \i =>
+  LetRegionValue MainRegion (MkPair (I64Op2 Plus i i) (Copy i)) id
 ```
+
+### forraskod szerkezete
+
+ - LoCal.idr - Location Calculus definicioja
+ - Dynamic.idr - C codegen backend for Location Calculus
+
+ - HiCal.idr - high level EDSL, that serves as a simple frontend language for LoCal
+ - HiCalToLoCal.idr - compiles to Location Calculus
+
+ - Driver.idr - HiCal to LoCal compiler driver
+
+ - Examples2.idr - outdated examples
+ - Examples3.idr - simple LoCal examples
+ - HiCalExamples.idr - HiCal examples

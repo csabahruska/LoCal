@@ -46,10 +46,10 @@ sample_tup2_sharing_02 =
   -- create i64 values
     MkTup2 exp_i1 exp_p1
 -}
-{-
 test3 : Program
-test3 = Main $ let i = MkI64 1 in PrintI64 i $ \() => i
+test3 = Main $ LetRegionValue MainRegion (MkI64 1) $ \i => PrintI64 i $ \() => i
 
 test4 : Program
-test4 = Main $ let i = MkI64 1 in MkPair (I64Op2 Plus i i) i
--}
+test4 = Main $
+  LetRegion $ \r => LetRegionValue r (MkI64 1) $ \i =>
+  LetRegionValue MainRegion (MkPair (I64Op2 Plus i i) (Copy i)) id
