@@ -17,6 +17,7 @@ Az osszetett adatok primitivekbol epulnek fel, pl a Bool az Either T0, igy pont 
 A rekordok parokbol az algebrai adattipusok egymasba agyazott either es par elemekbol epulnek fel.
 A rekurziv adattipusokat a Box primitivvel lehet kifejezni, az indirekciokat pedig Offset vagy Ptr tipussal.
 
+```idris
 data Ty : Type where
   T0      : Ty
   Pair    : Ty -> Ty -> Ty   -- serial access only, fst then snd
@@ -27,11 +28,13 @@ data Ty : Type where
   Ptr     : Ty -> Ty -- raw pointer ; no tag ; just the location data
   -- recursive type support
   Box     : String -> Lazy Ty -> Ty
+```
 
 2. memory layout
 az adat elhelyezkedeset a region es location hatarozza meg.
 a region egy buffer amiben osszefuggo adat van, a location az adat elemeinek elhelyezkedeset mondja meg egymashoz viszonyitva
 
+```idris
 data Region : Type where
   MkRegion    : Int -> Region
   MkArgRegion : String -> Nat -> Region
@@ -40,6 +43,7 @@ data Loc : (r : Region) -> Type where
   LocStart    : (t : Ty) -> (r : Region) -> Loc r
   LocAfter    : (t : Ty) -> Loc r -> Loc r
   LocAfterTag : String -> (t : Ty) -> Loc r -> Loc r -- statically known ; used for jump over the tag
+```
 
 3. adat eleres, iras olvasas, adat eleje es vege
 a nyelv immutable adatokat modellez, igy kulon van valasztva az iras es olvasas, azaz amikor erteket rakunk ossze es amikor erteket szedunk szet.
@@ -53,14 +57,18 @@ Az iras/olvasas es end-witness tulajdonsag kozott van osszefugges, ez ezek szeri
 Minden irott adat eseteben automatikusan eloall az end-witness ahogy beleirjuk az adatot a bufferbe es ezzel noveljuk a buffer pointert.
 Mig az olvasas modban csak akkor kapjuk meg az end-witness-t az adatot mar feldolgoztuk.
 
+```idris
 data EndWitness = NoEW | EW -- TODO: index it with Loc
 data RWMode = R EndWitness | W -- W always has end-witness
+```
 
 ### LoCal kifejezesek, a lenyeg
 az expression tipus az edsl lenyege. a tipus indexek kenyszeritik ki domain invariansait
 az utolso index a saved_ews meg nincs teljesen befejezve, ez jelenleg nincs hasznaatban csak proog of concept szerepet szolgalt egy kiserletben.
 
+```idris
 data Exp : (t : Ty) -> (loc : Loc r) -> (rw : RWMode) -> (saved_ews : List Type) -> Type
+```
 
 az exp osszetevoi:
   + primitiv muveletek a primitiv tipusokhoz mint az I64
@@ -103,10 +111,13 @@ test4 = Main $
  - LoCal.idr - Location Calculus definicioja
  - Dynamic.idr - C codegen backend for Location Calculus
 
+
  - HiCal.idr - high level EDSL, that serves as a simple frontend language for LoCal
  - HiCalToLoCal.idr - compiles to Location Calculus
 
+
  - Driver.idr - HiCal to LoCal compiler driver
+
 
  - Examples2.idr - outdated examples
  - Examples3.idr - simple LoCal examples
