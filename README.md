@@ -74,7 +74,7 @@ data RWMode = R EndWitness | W -- W always has end-witness
 * Producing end witnesses
 
 ```idris
-data Exp : (t : Ty) -> (loc : Loc r) -> (rw : RWMode) -> (saved_ews : List Type) -> Type
+data Exp : (t : Ty) -> (loc : Loc r) -> (rw : RWMode) -> (saved_ews : List Type) -> Type where
 
   -- Q: when to introduce new regions? A: for intermediate values
   LetRegion : (Region -> Exp t loc rw ews) -> Exp t loc rw ews -- TODO: remove this op, or add an iterpretation layer that evaluates it
