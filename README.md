@@ -1,21 +1,19 @@
 # LoCal
 
-An improved version of Gibbon compiler's Location Calculus as Idris2 EDSL.
+An improved version of Gibbon compiler's Location Calculus as an Idris2 EDSL.
 
-### Bevezeto
+### Overview
 
-A LoCal Idris EDSL az adatreprezentaciok leirasara keszult, az alabbi cikk alapjan: https://gibbon-compiler.github.io/public/pldi19ext.pdf
-Segitsegevel leirhato tetszoleges adatszerkezet, szamok, rekordok, algebrai adattipusok, rekurziv adatszerkezetek es indirekciok.
-Tovabba leirhatok azok a fuggvenyek is amik ezeken az adatokon dolgoznak, ugy hogy a reprezentaciot garantaltan helyesen kezelik.
+The LoCal Idris EDSL describes data representations based on this paper: https://gibbon-compiler.github.io/public/pldi19ext.pdf.
+It can represent arbitrary data structures, numbers, records, algebraic data types, recursive structures, and indirections,
+as well as functions operating on them while guaranteeing valid representation handling.
 
-A LoCal nyelv tulajdonsagai tipusokkal vannak garantaltan betartatva. Minden aspektus az Exp adattipus egy egy indexekent van modellezve,
- a reprezentalt adat tipusa, a memoria layoutja (location), hogy mar irtuk vagy olvastuk e (eljutottunk e az adat vegere)
+Language properties are enforced via types. Every aspect is modeled as a type index on `Exp`: the represented data type, its memory layout (`loc`), and whether it has been written or read (i.e., reached the end of the data).
 
-### A reprezentalt adat tipusa
-A reprezentalt adat a kovetkezo elemekbol epulhet fel.
-Az osszetett adatok primitivekbol epulnek fel, pl a Bool az Either T0, igy pont egy bitnyi informaciot tartalmaz.
-A rekordok parokbol az algebrai adattipusok egymasba agyazott either es par elemekbol epulnek fel.
-A rekurziv adattipusokat a Box primitivvel lehet kifejezni, az indirekciokat pedig Offset vagy Ptr tipussal.
+### Represented Data Types
+
+Composite types are built from primitives, for example, `Bool` can be `Either T0` (holding a single bit of information).
+Records come from pairs, algebraic data types from nested `Either` and pair types, recursive types from `Box`, and indirections from `Offset` or `Ptr`.
 
 ```idris
 data Ty : Type where
@@ -30,9 +28,9 @@ data Ty : Type where
   Box     : String -> Lazy Ty -> Ty
 ```
 
-### Memory layout
-Az adat elhelyezkedeset a region es location hatarozza meg.
-A region egy buffer amiben egybefuggo adat van, a location az adat elemeinek elhelyezkedeset mondja meg egymashoz viszonyitva.
+### Memory Layout
+
+Placement is determined by `Region` and `Loc`. A `Region` is a contiguous data buffer, while a `Loc` specifies the relative positions of elements within it.
 
 ```idris
 data Region : Type where
@@ -45,43 +43,41 @@ data Loc : (r : Region) -> Type where
   LocAfterTag : String -> (t : Ty) -> Loc r -> Loc r -- statically known ; used for jump over the tag
 ```
 
-### Adateleres, iras olvasas, adat eleje es vege
-A nyelv immutable adatokat modellez, igy kulon van valasztva az iras es olvasas, azaz amikor erteket rakunk ossze es amikor erteket szedunk szet.
-Ez lenyegeben azt jeleti hogy egy erteket addig nem olvashatunk amig nem raktuk ossze teljesen azaz amig nem irtuk ki az utolso elemet is.
-Ezt modellezi az RWMode.
+### Data Access: Read/Write and Start/End
 
-A masik fontos koncepcio az EndWitness. Az adatok a bufferben szigoruan egymas mellett (szomszedosan) helyezkednek el, es ha hozzaferest szeretnenk kapni egy elemre akkor
-ahhoz kotelezoen fel kell valahogy dolgozni az elotte levo elemet. A feldolgozas itt az adat meretenek megismereset jelenti.
-Az end witness azt jelenti hogy tudjuk az adott location levo adat meretet ezert mar van hozzaferesunk a rakovetkezo adatelemhez is.
-Az iras/olvasas es end-witness tulajdonsag kozott van osszefugges, eszerint modelleztem ezeket az EDSL-ben.
-Minden irott adat eseteben automatikusan eloall az end-witness ahogy beleirjuk az adatot a bufferbe es ezzel noveljuk a buffer pointert.
-Mig az olvasas modban csak akkor kapjuk meg az end-witness-t az adatot mar feldolgoztuk.
+Because the language models immutable data, writing (constructing values) and reading (destructing values) are separated.
+A value cannot be read until it is fully constructed (that is, until its last element is written) which `RWMode` models.
+
+`EndWitness` is another key concept. Elements sit contiguously in the buffer, and accessing a subsequent element requires processing the preceding one, meaning learning its size.
+Having an end witness means the size at `loc` is known, granting access to the next element.
+In write mode (`W`), an end witness is produced automatically as data is written and the buffer pointer advances,
+whereas in read mode (`R`), it is obtained only after the data has been processed.
 
 ```idris
 data EndWitness = NoEW | EW -- TODO: index it with Loc
 data RWMode = R EndWitness | W -- W always has end-witness
 ```
 
-### LoCal kifejezesek, a lenyeg
-Az expression tipus az EDSL lenyege. A tipus indexek kenyszeritik ki domain invariansait.
-Az utolso index a `saved_ews` meg nincs teljesen befejezve, ez jelenleg nincs hasznalatban csak proof of concept szerepet szolgalt egy korabbi kiserletben.
+### LoCal Expressions
+
+`Exp` is the core of the EDSL, using type indices to enforce domain invariants. The final `saved_ews` index is incomplete and currently unused, remaining only as a proof of concept from an earlier experiment.
 
 ```idris
 data Exp : (t : Ty) -> (loc : Loc r) -> (rw : RWMode) -> (saved_ews : List Type) -> Type
 ```
 
-Az Exp osszetevoi:
-  + primitiv muveletek a primitiv tipusokhoz mint az I64
-  + adatok konstrualasa: I64, parok, either
-  + adatok szetszedese: parok, either
-  + indirekcio keszitese, olvasasa
-  + rekurziv tipusok ki es becsomagolasa
-  + explicit sharing (copy)
-  + regio (buffer) keszitese
-  + fuggveny definicio es fuggvenyhivas
-  + end-witness eloallitasa
+`Exp` supports:
+* Primitive operations on primitive types (such as `I64`)
+* Constructing data (`I64`, pairs, `Either`)
+* Destructing data (pairs, `Either`)
+* Creating and reading indirections
+* Boxing and unboxing recursive types
+* Explicit sharing (`Copy`)
+* Creating regions (buffers)
+* Function definitions and calls
+* Producing end witnesses
 
-### Nehany egyszeru pelda
+### Simple Examples
 
 ```idris
 i64 : {loc : _} -> Exp I64 loc W []
@@ -106,13 +102,13 @@ test4 = Main $
   LetRegionValue MainRegion (MkPair (I64Op2 Plus i i) (Copy i)) id
 ```
 
-### Forraskod szerkezete
+### Source Code Structure
 
- - LoCal.idr - Location Calculus definicioja
- - Dynamic.idr - C codegen backend for Location Calculus
- - HiCal.idr - high level EDSL, that serves as a simple frontend language for LoCal
- - HiCalToLoCal.idr - compiles to Location Calculus
- - Driver.idr - HiCal to LoCal compiler driver
- - Examples2.idr - outdated examples
- - Examples3.idr - simple LoCal examples
- - HiCalExamples.idr - HiCal examples
+* `LoCal.idr` — Location Calculus definition
+* `Dynamic.idr` — C codegen backend for Location Calculus
+* `HiCal.idr` — High-level EDSL serving as a simple frontend language for LoCal
+* `HiCalToLoCal.idr` — Compiles `HiCal` to Location Calculus
+* `Driver.idr` — `HiCal` to LoCal compiler driver
+* `Examples2.idr` — Outdated examples
+* `Examples3.idr` — Simple LoCal examples
+* `HiCalExamples.idr` — `HiCal` examples
