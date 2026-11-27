@@ -62,10 +62,6 @@ data RWMode = R EndWitness | W -- W always has end-witness
 
 `Exp` is the core of the EDSL, using type indices to enforce domain invariants. The final `saved_ews` index is incomplete and currently unused, remaining only as a proof of concept from an earlier experiment.
 
-```idris
-data Exp : (t : Ty) -> (loc : Loc r) -> (rw : RWMode) -> (saved_ews : List Type) -> Type
-```
-
 `Exp` supports:
 * Primitive operations on primitive types (such as `I64`)
 * Constructing data (`I64`, pairs, `Either`)
@@ -76,6 +72,116 @@ data Exp : (t : Ty) -> (loc : Loc r) -> (rw : RWMode) -> (saved_ews : List Type)
 * Creating regions (buffers)
 * Function definitions and calls
 * Producing end witnesses
+
+```idris
+data Exp : (t : Ty) -> (loc : Loc r) -> (rw : RWMode) -> (saved_ews : List Type) -> Type
+
+  -- Q: when to introduce new regions? A: for intermediate values
+  LetRegion : (Region -> Exp t loc rw ews) -> Exp t loc rw ews -- TODO: remove this op, or add an iterpretation layer that evaluates it
+  LetRegionValue : {t_val : _} -> (r_val : Region) -> Exp t_val (LocStart t_val r_val) W [] ->
+                   (Exp t_val (LocStart t_val r_val) REW [] -> Exp a loc rw ews) -> Exp a loc rw ews
+
+  -- to copy values cross region ; requires full traversal effect on the argument, so the end-witness should be available
+  Copy : {r_in : _} -> {loc_in : Loc r_in} -> Exp t loc_in REW [] -> Exp t loc W []
+
+  -- boxing
+  MkBox : {t : Ty} -> {n : String} -> Exp t loc rw [] -> Exp (Box n $ Delay t) loc rw []
+  UnBox : {t : Ty} -> {n : String} -> Exp (Box n $ Delay t) loc rw [] -> Exp t loc rw []
+
+  -- value shapes, ADT can be modeled with these
+
+  -- MkPair is the only origin of the 'after' relation between locations
+  MkPair : {a, b : Ty} -> {loc : _} ->
+    let locFst = LocAfterTag "Pair" a loc in
+    let locSnd = LocAfter b locFst in
+    Exp a locFst W [] -> Exp b locSnd W [] -> Exp (Pair a b) loc W []
+
+  MkLeft  : {a, b : Ty} -> {loc : _} ->
+    let locArg = LocAfterTag "Left" a loc in
+    Exp a locArg W [] -> Exp (Either a b) loc W []
+
+  MkRight : {a, b : Ty} -> {loc : _} ->
+    let locArg = LocAfterTag "Right" b loc in
+    Exp b locArg W [] -> Exp (Either a b) loc W []
+
+  -- serial access pair
+  GetFst : {r_tup : _} -> {a, b : Ty} -> {loc_tup : Loc r_tup} -> {ew_tup : _} ->
+              Exp (Pair a b) loc_tup (R ew_tup) [] ->
+              let locFst = LocAfterTag "Pair" a loc_tup in
+              Exp a locFst RNoEW []
+
+  GetSnd : {r_tup : _} -> {a, b : Ty} -> {loc_tup : Loc r_tup} -> {ew_tup: _} ->
+           Exp (Pair a b) loc_tup (R ew_tup) [] ->
+           let locFst = LocAfterTag "Pair" a loc_tup in
+           let locSnd = LocAfter b locFst in
+           Exp a locFst REW [] -> Exp b locSnd (R ew_tup) []
+
+  CaseEither : {rw : _} -> {r_scrut : _} -> {a, b, c : Ty} -> {loc_scrut : Loc r_scrut} -> {ew_scrut : _} -> {loc : _} -> {ews : _} ->
+               Exp (Either a b) loc_scrut (R ew_scrut) [] ->
+               let locL = LocAfterTag "Left"  a loc_scrut in
+               let locR = LocAfterTag "Right" b loc_scrut in
+               (Exp a locL (R ew_scrut) [] -> Exp c loc rw ews) ->
+               (Exp b locR (R ew_scrut) [] -> Exp c loc rw ews) ->
+               Exp c loc rw ews
+
+  -- IDEA: store end-witnesses as an index in Exp
+  AddEW : Exp t1 loc1 REW [] -> Exp t2 loc2 rw2 ews2 -> Exp t2 loc2 rw2 (Exp t1 loc1 REW [] :: ews2)
+  GetEWS : Exp _ _ _ fun_ews -> (Arg fun_ews -> Exp c loc rw ews) -> Exp c loc rw ews
+
+  FunAppDef : {fun_ews : _} -> {res : _} -> {r_res : _} -> {loc_res : Loc r_res} ->
+           (fun : String) ->
+           (fun_def  : Arg {fun} {n} exps_in  -> Exp res loc_res W fun_ews) ->
+           (fun_args : Arg {fun} {n} exps_in) -> Exp res loc_res W fun_ews
+
+  FunApp : {fun_ews : _} -> {res : _} -> {r_res : _} -> {loc_res : Loc r_res} ->
+           String ->
+           (fun_args : Arg exps_in) -> Exp res loc_res W fun_ews
+
+  -- indirection, within same region
+  MkOffset    : {r : _} -> {loc, loc_in : Loc r} -> Exp x loc_in W [] -> Exp (Offset x) loc W []
+  DeRefOffset : {x : _} -> {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
+                Exp (Offset x) loc_in (R ew_in) [] -> ({r_val : _} -> Exp x (LocStart x r_val) RNoEW [] -> Exp a loc rw ews) -> Exp a loc rw ews
+
+  -- indirection, cross region
+  MkPtr    : {rw_in : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp x loc_in rw_in [] -> Exp (Ptr x) loc W []
+  DeRefPtr : {x : _} -> {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} ->
+             Exp (Ptr x) loc_in (R ew_in) [] -> ({r_val : _} -> Exp x (LocStart x r_val) RNoEW [] -> Exp a loc rw ews) -> Exp a loc rw ews
+
+  -- primitive values
+  MkT0  : Exp T0 loc W []
+  MkI64 : Int -> Exp I64 loc W []
+
+  -- I64 primops
+  I64Op2  : IntOp2 -> {ew1, ew2 : _} -> {r_in1, r_in2 : _} -> {loc_in1 : Loc r_in1} -> {loc_in2 : Loc r_in2} -> Exp I64 loc_in1 (R ew1) [] -> Exp I64 loc_in2 (R ew2) [] -> Exp I64 loc W []
+  I64Cmp  : CmpOp  -> {ew1, ew2 : _} -> {r_in1, r_in2 : _} -> {loc_in1 : Loc r_in1} -> {loc_in2 : Loc r_in2} -> Exp I64 loc_in1 (R ew1) [] -> Exp I64 loc_in2 (R ew2) [] -> Exp (Either T0 T0) loc W []
+
+  -- IO primops
+  PrintI64 : {ew_in : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp I64 loc_in (R ew_in) [] -> (() -> Exp t loc rw ews) -> Exp t loc rw ews
+
+  -- prints the buffer content at the location in hexadecimal
+  PrintValue : {t_in : _} -> {r_in : _} -> {loc_in : Loc r_in} -> Exp t_in loc_in REW [] -> (() -> Exp t loc rw ews) -> Exp t loc rw ews
+
+  -- end-witnesses
+  StaticEW : {ew_in : _} -> {auto prf : True = isStaticSize t} -> Exp t loc (R ew_in) [] -> Exp t loc REW []
+
+  GenEW : {t : _} -> {r : _} -> {loc : Loc r} -> {ew_in : _} -> Exp t loc (R ew_in) [] -> Exp t loc REW []
+
+  PairEW : {r_tup : _} -> {a, b : Ty} -> {loc_tup : Loc r_tup} -> {ew_tup : _} ->
+           Exp (Pair a b) loc_tup (R ew_tup) [] ->
+           let locFst = LocAfterTag "Pair" a loc_tup in
+           let locSnd = LocAfter b locFst in
+           Exp b locSnd REW [] -> Exp (Pair a b) loc_tup REW []
+
+  LeftEW : {ew_scrut : _} -> {r_scrut : _} -> {a, b : Ty} -> {loc_scrut : Loc r_scrut} ->
+           Exp (Either a b) loc_scrut (R ew_scrut) [] ->
+           let locL = LocAfterTag "Left" a loc_scrut in
+           Exp a locL REW [] -> Exp (Either a b) loc_scrut REW []
+
+  RightEW : {ew_scrut : _} -> {r_scrut : _} -> {a, b : Ty} -> {loc_scrut : Loc r_scrut} ->
+            Exp (Either a b) loc_scrut (R ew_scrut) [] ->
+            let locR = LocAfterTag "Right" b loc_scrut in
+            Exp b locR REW [] -> Exp (Either a b) loc_scrut REW []
+```
 
 ### Simple Examples
 
